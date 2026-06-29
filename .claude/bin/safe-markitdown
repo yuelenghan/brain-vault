@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Safely convert a vault Inbox document to Markdown using MarkItDown."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+TRUSTED_CWD = "/usr/bin"
+
+
+def fail(message: str) -> int:
+    print(f"safe-markitdown: {message}", file=sys.stderr)
+    return 2
+
+
+def clean_environment() -> dict[str, str]:
+    allowed = {
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "PATH",
+        "SYSTEMROOT",
+        "TMPDIR",
+        "VAULT",
+        "WINDIR",
+    }
+    env = {key: value for key, value in os.environ.items() if key in allowed}
+    env.pop("PYTHONHOME", None)
+    env.pop("PYTHONPATH", None)
+    return env
+
+
+def resolve_vault() -> Path:
+    if os.environ.get("VAULT"):
+        return Path(os.environ["VAULT"]).resolve()
+    return Path.cwd().resolve()
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 2:
+        return fail("expected exactly one relative path under Inbox")
+
+    raw = argv[1]
+    if raw.startswith("-"):
+        return fail("path must not start with '-'")
+
+    input_path = Path(raw)
+    if input_path.is_absolute() or ".." in input_path.parts:
+        return fail("path must be relative and must not contain '..'")
+
+    vault = resolve_vault()
+    inbox = (vault / "Inbox").resolve()
+    candidate = (vault / input_path).resolve()
+
+    if not str(candidate).startswith(str(inbox) + os.sep):
+        return fail("path must resolve inside Inbox")
+    if not candidate.is_file():
+        return fail("path is not a file")
+    if candidate.is_symlink():
+        return fail("symlink input is not allowed")
+
+    out_name = candidate.with_suffix(".md").name
+    output = inbox / out_name
+    if os.path.lexists(output):
+        return fail(f"output already exists: Inbox/{out_name}")
+
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{candidate.stem}.",
+        suffix=".md.tmp",
+        dir=inbox,
+        text=True,
+    )
+    os.close(fd)
+    temp_path = Path(temp_name)
+
+    command = ["markitdown", str(candidate), "-o", str(temp_path)]
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            cwd=TRUSTED_CWD,
+            env=clean_environment(),
+        )
+        if completed.returncode != 0:
+            return completed.returncode
+        if not temp_path.is_file() or temp_path.is_symlink() or temp_path.stat().st_size == 0:
+            return fail("markitdown output is empty or invalid")
+        if os.path.lexists(output):
+            return fail(f"output appeared during conversion: Inbox/{out_name}")
+        os.replace(temp_path, output)
+    except OSError as exc:
+        print(f"safe-markitdown: failed to execute markitdown: {exc}", file=sys.stderr)
+        return 127
+    finally:
+        try:
+            if temp_path.exists() or temp_path.is_symlink():
+                temp_path.unlink()
+        except OSError:
+            pass
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

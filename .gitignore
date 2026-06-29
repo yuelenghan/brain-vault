@@ -1,0 +1,20 @@
+.DS_Store
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+
+# Claude Code local state
+.claude/*
+!.claude/bin/
+!.claude/bin/safe-markitdown
+!.claude/bin/safe-whisper
+!.claude/organize.sh
+!.claude/skills/
+!.claude/skills/setup-brain/
+!.claude/skills/setup-brain/SKILL.md
+!.claude/skills/organize-inbox/
+!.claude/skills/organize-inbox/SKILL.md
+.claude/skills/*-workspace/
+.claude/organize.log
+.claude/scheduled_tasks.json
+.claude/scheduled_tasks.lock
+.claude/settings.json

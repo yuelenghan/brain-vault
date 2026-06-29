@@ -1,0 +1,174 @@
+---
+name: setup-brain
+description: 初始化 my-brain vault：采访用户身份和目标，生成 CLAUDE.md，检查 PARA 目录、git 状态和本机转换工具（markitdown、whisper），并按用户确认安装缺失工具。
+---
+
+# Setup Brain
+
+你是 my-brain 初始化向导。目标是在当前 vault 根目录完成一次安全、可重复的初始化。不要读取或外传凭证。不要删除用户文件。执行安装命令、覆盖已有配置、提交 git 或设置定时任务前必须先确认。
+
+## 适用前提
+
+- 工作目录应是 my-brain vault 根目录。
+- 如果当前目录不是 git 仓库，先说明并询问是否初始化 git。
+- 如果 `CLAUDE.md` 已包含用户真实内容，不要静默覆盖；先读取并说明将更新哪些段落。
+
+## 初始化流程
+
+### 1. 预检
+
+运行并记录：
+
+```bash
+pwd
+git status --short
+find . -maxdepth 2 -type d \( -path './.git' -o -path './.claude' \) -prune -o -type d -print
+command -v markitdown || true
+command -v whisper || true
+command -v uv || true
+command -v brew || true
+command -v python3 || true
+```
+
+若存在未提交改动，不要自动覆盖相关文件；把它们列为 protected paths。
+
+### 2. 采访用户
+
+一次性询问必要信息，避免反复打断：
+
+1. 你是谁？角色、主要职责、专业方向是什么？
+2. 今年或近期最重要的目标是什么？
+3. 当前活跃项目有哪些？每个项目一句话说明。
+4. 你希望 Claude 如何协作？例如是否偏好简洁结论、详细推理、自动执行、谨慎确认等。
+5. 是否启用文档转换能力（Word/PDF/PPT/Excel → Markdown）？
+6. 是否启用音频转录能力（音视频 → Markdown）？
+7. 是否需要离线自动整理？如果需要，偏好手动运行 `organize.sh`、系统 crontab/launchd，还是 Claude Code 会话内定时？
+
+如用户只要求快速初始化，可使用保守默认：保留现有协作偏好，创建空 PARA 目录，只检测工具不安装。
+
+### 3. 生成或更新 CLAUDE.md
+
+根据用户回答更新：
+
+- `## 我是谁`
+- `## 今年的目标`
+- `## 协作偏好`
+- `## 当前项目`
+
+保留下方 Vault 约定、常用命令、工具层级和项目级坑点。不要写入临时任务状态、一次性信息或凭证。
+
+### 4. 确保目录结构
+
+确保以下目录存在：
+
+```text
+Inbox/
+Projects/
+Areas/
+Resources/
+Archive/
+.claude/bin/
+.claude/skills/setup-brain/
+.claude/skills/organize-inbox/
+```
+
+空目录用 `.gitkeep` 保留。
+
+### 5. 工具检测与安装引导
+
+#### 基础检测
+
+- `markitdown`：用于 `.doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf` 转 Markdown。
+- `whisper`：用于 `.mp3/.m4a/.wav/.mp4/.mov/.aac/.flac/.ogg/.opus/.webm` 转 Markdown。
+- `uv`、`brew`、`python3`：用于推荐安装路径判断。
+
+#### 安装原则
+
+- clone 仓库不会自动安装任何工具。
+- 只检测时无需确认；执行安装命令前必须确认。
+- 优先给出命令，让用户自己决定是否运行。
+- 不要猜测包名或参数；安装前用已存在工具的 `--help` 或官方/本机说明验证命令。无法验证时说明不确定并让用户手动安装。
+
+#### 推荐安装路径
+
+如果用户启用文档转换且缺少 `markitdown`：
+
+1. 若有 `uv`，先运行 `uv tool install --help` 验证命令存在，再建议：
+
+   ```bash
+   uv tool install markitdown
+   ```
+
+2. 若无 `uv` 但有 `python3`，建议用户选择自己的 Python 包管理方式安装 MarkItDown；不要替用户猜测全局 pip 安装策略。
+3. 安装后验证：
+
+   ```bash
+   command -v markitdown
+   markitdown --help
+   ```
+
+如果用户启用音频转录且缺少 `whisper`：
+
+1. 若有 `brew`，先运行 `brew info openai-whisper` 验证 formula 存在，再建议：
+
+   ```bash
+   brew install openai-whisper
+   ```
+
+2. 若无 `brew` 但有 `uv`，先运行 `uv pip install --help` 验证命令存在；Python 安装 Whisper 通常需要目标环境，先让用户选择环境，不要静默全局安装。
+3. 若用户已有 Python 方案，允许用户提供安装命令。
+4. 安装后验证：
+
+   ```bash
+   command -v whisper
+   whisper --help
+   ```
+
+Whisper 模型可能较大，首次运行可能下载模型；执行真实转录前提醒用户。
+
+### 6. Wrapper 检查
+
+确认以下文件存在且可执行：
+
+```bash
+test -x .claude/bin/safe-markitdown
+test -x .claude/bin/safe-whisper
+```
+
+如不可执行，执行：
+
+```bash
+chmod +x .claude/bin/safe-markitdown .claude/bin/safe-whisper .claude/organize.sh
+```
+
+运行语法检查：
+
+```bash
+python3 -m py_compile .claude/bin/safe-markitdown .claude/bin/safe-whisper
+zsh -n .claude/organize.sh
+```
+
+### 7. 可选自动整理
+
+如果用户需要自动整理，说明三种方式：
+
+- 会话内：用 Claude Code 定时任务触发 `/organize-inbox`，但会话关闭或任务过期会影响运行。
+- 系统级：用 crontab/launchd 调 `VAULT=/path/to/brain .claude/organize.sh`。
+- 手动：定期运行 `/organize-inbox` 或 `.claude/organize.sh`。
+
+修改系统 crontab/launchd 前必须确认。
+
+### 8. 最终验证和输出
+
+运行：
+
+```bash
+git status --short
+```
+
+输出保持简洁：
+
+- 已初始化的身份层段落。
+- 工具状态：`markitdown` 已安装/未安装，`whisper` 已安装/未安装。
+- 已启用能力：Markdown 整理、文档转换、音频转录。
+- 下一步：把资料放入 `Inbox/`，运行 `/organize-inbox`。

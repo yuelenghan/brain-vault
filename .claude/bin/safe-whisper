@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""Safely transcribe a vault Inbox audio/video file to Markdown using Whisper."""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+TRUSTED_CWD = "/usr/bin"
+AUDIO_EXTENSIONS = {
+    ".aac",
+    ".aiff",
+    ".flac",
+    ".m4a",
+    ".mov",
+    ".mp3",
+    ".mp4",
+    ".ogg",
+    ".opus",
+    ".wav",
+    ".webm",
+}
+
+
+def fail(message: str) -> int:
+    print(f"safe-whisper: {message}", file=sys.stderr)
+    return 2
+
+
+def clean_environment() -> dict[str, str]:
+    allowed = {
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "PATH",
+        "SYSTEMROOT",
+        "TMPDIR",
+        "VAULT",
+        "WHISPER_MODEL",
+        "WHISPER_LANGUAGE",
+        "WINDIR",
+    }
+    env = {key: value for key, value in os.environ.items() if key in allowed}
+    env.pop("PYTHONHOME", None)
+    env.pop("PYTHONPATH", None)
+    return env
+
+
+def resolve_vault() -> Path:
+    if os.environ.get("VAULT"):
+        return Path(os.environ["VAULT"]).resolve()
+    return Path.cwd().resolve()
+
+
+def whisper_command(candidate: Path, temp_dir: Path, env: dict[str, str]) -> list[str]:
+    executable = shutil.which("whisper", path=env.get("PATH"))
+    if not executable:
+        raise FileNotFoundError("whisper")
+
+    command = [
+        executable,
+        str(candidate),
+        "--output_format",
+        "txt",
+        "--output_dir",
+        str(temp_dir),
+    ]
+    if env.get("WHISPER_MODEL"):
+        command.extend(["--model", env["WHISPER_MODEL"]])
+    if env.get("WHISPER_LANGUAGE"):
+        command.extend(["--language", env["WHISPER_LANGUAGE"]])
+    return command
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 2:
+        return fail("expected exactly one relative path under Inbox")
+
+    raw = argv[1]
+    if raw.startswith("-"):
+        return fail("path must not start with '-'")
+
+    input_path = Path(raw)
+    if input_path.is_absolute() or ".." in input_path.parts:
+        return fail("path must be relative and must not contain '..'")
+
+    if input_path.suffix.lower() not in AUDIO_EXTENSIONS:
+        return fail(f"unsupported audio/video extension: {input_path.suffix}")
+
+    vault = resolve_vault()
+    inbox = (vault / "Inbox").resolve()
+    candidate = (vault / input_path).resolve()
+
+    if not str(candidate).startswith(str(inbox) + os.sep):
+        return fail("path must resolve inside Inbox")
+    if not candidate.is_file():
+        return fail("path is not a file")
+    if candidate.is_symlink():
+        return fail("symlink input is not allowed")
+
+    out_name = candidate.with_suffix(".md").name
+    output = inbox / out_name
+    if os.path.lexists(output):
+        return fail(f"output already exists: Inbox/{out_name}")
+
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{candidate.stem}.",
+        suffix=".md.tmp",
+        dir=inbox,
+        text=True,
+    )
+    os.close(fd)
+    temp_path = Path(temp_name)
+
+    env = clean_environment()
+    with tempfile.TemporaryDirectory(prefix="safe-whisper-") as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        try:
+            command = whisper_command(candidate, temp_dir, env)
+            completed = subprocess.run(
+                command,
+                check=False,
+                cwd=TRUSTED_CWD,
+                env=env,
+            )
+            if completed.returncode != 0:
+                return completed.returncode
+
+            transcript = temp_dir / f"{candidate.stem}.txt"
+            if not transcript.is_file() or transcript.is_symlink() or transcript.stat().st_size == 0:
+                return fail("whisper output is empty or invalid")
+
+            text = transcript.read_text(encoding="utf-8", errors="replace").strip()
+            if not text:
+                return fail("whisper output is blank")
+
+            temp_path.write_text(
+                f"# {candidate.stem}\n\n原始文件：[[{candidate.name}]]\n\n## 转录\n\n{text}\n",
+                encoding="utf-8",
+            )
+            if os.path.lexists(output):
+                return fail(f"output appeared during transcription: Inbox/{out_name}")
+            os.replace(temp_path, output)
+        except FileNotFoundError:
+            print("safe-whisper: failed to execute whisper: command not found", file=sys.stderr)
+            return 127
+        except OSError as exc:
+            print(f"safe-whisper: failed to execute whisper: {exc}", file=sys.stderr)
+            return 127
+        finally:
+            try:
+                if temp_path.exists() or temp_path.is_symlink():
+                    temp_path.unlink()
+            except OSError:
+                pass
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
