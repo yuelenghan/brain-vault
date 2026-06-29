@@ -1,5 +1,5 @@
 #!/bin/zsh
-# my-brain vault 整理 — headless claude -p 离线兜底
+# brain-vault 整理 — headless claude -p 离线兜底
 # 安全：整理 Inbox 下所有笔记文件；禁删，禁止 git add -A，避免混入无关改动。
 # 逻辑源：.claude/skills/organize-inbox/SKILL.md。
 set -u
