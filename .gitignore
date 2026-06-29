@@ -15,6 +15,7 @@ __pycache__/
 !.claude/skills/organize-inbox/SKILL.md
 .claude/skills/*-workspace/
 .claude/organize.log
+.claude/optimize-vault.log
 .claude/scheduled_tasks.json
 .claude/scheduled_tasks.lock
 .claude/settings.json

@@ -37,7 +37,7 @@ PROMPT="读取 $VAULT/.claude/skills/organize-inbox/SKILL.md 并严格按其执�
 perl -e 'alarm shift @ARGV; exec @ARGV' -- "$ORGANIZE_TIMEOUT_SECONDS" \
   claude --bare -p "$PROMPT" \
     --add-dir "$VAULT" \
-    --allowedTools "Read" "Glob" "Grep" "Write" "Edit" "Bash(mkdir -p *)" "Bash(.claude/bin/safe-markitdown *)" "Bash(.claude/bin/safe-whisper *)" "Bash(shasum *)" "Bash(git add *)" "Bash(git mv *)" "Bash(git commit *)" "Bash(git status)" "Bash(git status *)" "Bash(git log *)" \
+    --allowedTools "Read" "Glob" "Grep" "Write" "Edit" "Bash(mkdir -p *)" "Bash(python3 .claude/skills/organize-inbox/scripts/organize_inbox.py *)" "Bash(.claude/bin/safe-markitdown *)" "Bash(.claude/bin/safe-whisper *)" "Bash(git add *)" "Bash(git mv *)" "Bash(git commit *)" "Bash(git status)" "Bash(git status *)" "Bash(git log *)" \
     --output-format json \
   < /dev/null
 claude_exit=$?

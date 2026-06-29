@@ -76,6 +76,7 @@ Archive/
 .claude/bin/
 .claude/skills/setup-brain/
 .claude/skills/organize-inbox/
+.claude/skills/optimize-vault/
 ```
 
 空目录用 `.gitkeep` 保留。
@@ -221,5 +222,5 @@ git status --short
 
 - 已初始化的身份层段落。
 - 工具状态：`markitdown` 已安装/未安装，`whisper` 已安装/未安装，`ffmpeg` 已安装/未安装，Whisper 默认模型/模型下载提醒，`copilot` 已安装/未安装，`codex` 已安装/未安装。
-- 已启用能力：Markdown 整理、文档/数据/网页/Notebook 转换、截图占位、音视频转录、Copilot CLI 指令、Codex/通用 agent 指令。
-- 下一步：把资料放入 `Inbox/`，运行 `/organize-inbox`。
+- 已启用能力：Markdown 整理、文档/数据/网页/Notebook 转换、截图占位、音视频转录、已整理笔记优化、Copilot CLI 指令、Codex/通用 agent 指令。
+- 下一步：把资料放入 `Inbox/`，运行 `/organize-inbox`；需要体检已整理笔记时运行 `/optimize-vault`。

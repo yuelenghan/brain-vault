@@ -40,6 +40,7 @@
 
 - 初始化 brain：运行 `/setup-brain`。
 - 手动整理 Inbox：运行 `/organize-inbox`。
+- 优化已整理笔记：运行 `/optimize-vault`。
 - 离线兜底整理：在 vault 根目录运行 `VAULT="$PWD" .claude/organize.sh`。
 - Copilot CLI：在 vault 根目录运行 `copilot`，并参考 `.github/copilot-instructions.md`。
 - Codex CLI：在 vault 根目录运行 `codex`，并参考 `AGENTS.md`。
@@ -54,6 +55,7 @@
 ## 项目级坑点
 
 - `organize-inbox` skill 是整理逻辑源；会话内手动、定时任务和 `organize.sh` 离线兜底应尽量共用同一份规则。
+- `optimize-vault` skill 只处理已整理的 `Projects/`、`Areas/`、`Resources/`、`Archive/`，用于去重、补链、修复失效链接和生成优化报告；不要用于整理 `Inbox/`。
 - `organize.sh` 的默认 `VAULT` 应指向当前仓库根；不要写死某个人机器上的绝对路径。
 - 整理提交禁止 `git add -A`；只暂存本次整理相关文件，避免混入无关工作区改动。
 - 本机工具不会随 git clone 自动安装；`/setup-brain` 只做检测和引导，执行安装、登录或修复 CLI 前必须获得用户确认。

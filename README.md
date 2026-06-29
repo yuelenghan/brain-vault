@@ -46,9 +46,10 @@ Claude Code 是当前模板的完整体验入口，支持内置技能：
 ```text
 /setup-brain
 /organize-inbox
+/optimize-vault
 ```
 
-适合初始化知识库、整理 Inbox、运行离线整理脚本和维护 vault 规则。
+适合初始化知识库、整理 Inbox、优化已整理笔记、运行离线整理脚本和维护 vault 规则。
 
 ### GitHub Copilot CLI
 
@@ -111,7 +112,7 @@ AGENTS.md   # 通用 agent 指令
 /organize-inbox
 ```
 
-整理时会：
+整理时会先运行确定性预处理脚本，枚举 Inbox 文件、转换可支持格式、生成来源指纹并识别完全重复；随后会：
 
 - 按 PARA 规则分流到 `Projects/`、`Areas/`、`Resources/` 或 `Archive/`；
 - 为有长期价值的内容创建或更新承接笔记；
@@ -119,6 +120,14 @@ AGENTS.md   # 通用 agent 指令
 - 尽量保护整理前已有的未提交改动；
 - 只提交本次整理相关文件；
 - 在本地追加整理日志 `.claude/organize.log`。
+
+已整理笔记需要体检、去重、补链或修复失效链接时，运行：
+
+```text
+/optimize-vault
+```
+
+该技能只处理 `Projects/`、`Areas/`、`Resources/` 和 `Archive/`，不会整理 `Inbox/`。
 
 Copilot CLI 和 Codex CLI 当前主要通过 `.github/copilot-instructions.md` 与 `AGENTS.md` 获得仓库约定；如果用它们整理内容，请明确要求遵守这些文件中的安全边界。
 
@@ -210,6 +219,8 @@ VAULT="$PWD" .claude/organize.sh
 - `.github/copilot-instructions.md`；
 - `AGENTS.md`；
 - `safe-markitdown` 和 `safe-whisper` 安全 wrapper；
+- `/optimize-vault` 已整理笔记优化技能；
+- `organize-inbox` 和 `optimize-vault` 的确定性辅助脚本；
 - `organize.sh` 离线整理脚本。
 
 本仓库不包含：
