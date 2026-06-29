@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+"""Run organize-inbox duplicate archival with fixed report paths."""
+
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+
+SCRIPT = Path(".claude/skills/organize-inbox/scripts/organize_inbox.py")
+JSON_REPORT = "/tmp/organize-inbox.json"
+MARKDOWN_REPORT = "/tmp/organize-inbox.md"
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?$")
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 1 or not DATE_RE.match(argv[0]):
+        print("organize-inbox-apply-duplicates: expected one YYYY-MM-DD or YYYY-MM-DD HH:MM date", file=sys.stderr)
+        return 2
+    return subprocess.run(
+        [
+            "python3",
+            str(SCRIPT),
+            "--mode",
+            "apply-duplicates",
+            "--json",
+            JSON_REPORT,
+            "--markdown",
+            MARKDOWN_REPORT,
+            "--date",
+            argv[0],
+        ],
+        check=False,
+    ).returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

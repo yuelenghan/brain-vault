@@ -25,6 +25,9 @@ SCOPES = ("Projects", "Areas", "Resources", "Archive")
 TRACKING_PARAMS = {"fbclid", "gclid", "msclkid", "dclid", "igshid"}
 TRACKING_PREFIXES = ("utm_",)
 URL_RE = re.compile(r"https?://[^\s)\]}>\"']+")
+FIXED_REPORT_DIR = Path("/tmp").resolve()
+FIXED_JSON_REPORT = FIXED_REPORT_DIR / "organize-inbox.json"
+FIXED_MARKDOWN_REPORT = FIXED_REPORT_DIR / "organize-inbox.md"
 
 
 @dataclass
@@ -226,8 +229,9 @@ def read_markdown_info(vault: Path, markdown_rel: str) -> tuple[str | None, list
     return title, extract_urls(frontmatter, text), fingerprint(text)
 
 
-def existing_notes(vault: Path) -> list[dict]:
+def existing_notes(vault: Path) -> tuple[list[dict], list[dict]]:
     notes: list[dict] = []
+    invalid_fingerprints: list[dict] = []
     for scope in SCOPES:
         root = vault / scope
         if not root.exists():
@@ -239,13 +243,22 @@ def existing_notes(vault: Path) -> list[dict]:
             text = path.read_text(encoding="utf-8", errors="replace")
             frontmatter, body = parse_frontmatter(text)
             title = frontmatter.get("title") or heading_title(body) or path.stem
+            computed_fingerprint = fingerprint(text)
+            stored_fingerprint = frontmatter.get("content_fingerprint")
+            fingerprint_valid = not stored_fingerprint or stored_fingerprint == computed_fingerprint
+            if not fingerprint_valid:
+                invalid_fingerprints.append({
+                    "path": rel,
+                    "stored": stored_fingerprint,
+                    "computed": computed_fingerprint,
+                })
             notes.append({
                 "path": rel,
                 "title": title,
                 "urls": extract_urls(frontmatter, text),
-                "fingerprint": frontmatter.get("content_fingerprint") or fingerprint(text),
+                "fingerprint": computed_fingerprint if fingerprint_valid else None,
             })
-    return notes
+    return notes, invalid_fingerprints
 
 
 def find_duplicates(candidates: list[Candidate], notes: list[dict]) -> list[dict]:
@@ -317,13 +330,14 @@ def make_report(vault: Path, convert: bool) -> dict:
             candidate.markdown_path = markdown_rel
         candidates.append(candidate)
 
-    notes = existing_notes(vault)
+    notes, invalid_fingerprints = existing_notes(vault)
     duplicates = find_duplicates(candidates, notes)
     return {
         "protected_paths": protected,
         "inbox_count": len(candidates),
         "candidates": [candidate.__dict__ for candidate in candidates],
         "existing_note_count": len(notes),
+        "invalid_fingerprints": invalid_fingerprints,
         "duplicates": duplicates,
         "applied": {"duplicates": []},
         "skipped": [],
@@ -381,6 +395,7 @@ def append_log(vault: Path, report: dict, date: str, mode: str) -> None:
 def markdown_report(report: dict) -> str:
     ready = [c for c in report["candidates"] if c["status"] == "ready"]
     left = [c for c in report["candidates"] if c["status"] != "ready"]
+    invalid = report.get("invalid_fingerprints", [])
     lines = [
         "## 范围与扫描结果",
         f"- Inbox 候选：{report['inbox_count']}",
@@ -390,6 +405,7 @@ def markdown_report(report: dict) -> str:
         "## 确定性结果",
         f"- protected paths：{', '.join(report['protected_paths']) if report['protected_paths'] else '无'}",
         f"- 完全重复：{len(report['duplicates']) if report['duplicates'] else '无'}",
+        f"- 指纹不一致：{len(invalid) if invalid else '无'}",
         f"- 已归档重复：{len(report['applied']['duplicates']) if report['applied']['duplicates'] else '无'}",
         "",
         "## 需要模型继续处理",
@@ -405,6 +421,29 @@ def markdown_report(report: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def checked_report_path(raw: str, expected: Path, label: str) -> Path:
+    out = Path(raw).resolve()
+    if out != expected:
+        raise ValueError(f"{label} report path must be /tmp/{expected.name}")
+    if out.exists() and out.is_symlink():
+        raise ValueError(f"{label} report path must not be a symlink")
+    return out
+
+
+def write_report_file(path: Path, content: str) -> None:
+    if path.parent != FIXED_REPORT_DIR:
+        raise ValueError("report parent must be /tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise ValueError(f"failed to open report path safely: {exc}") from exc
+    with os.fdopen(fd, "w", encoding="utf-8") as out:
+        out.write(content)
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Prepare Inbox files for model-assisted PARA organization.")
     parser.add_argument("--vault", default=".")
@@ -416,23 +455,30 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     vault = Path(args.vault).resolve()
+    cwd = Path.cwd().resolve()
+    if vault != cwd:
+        return fail("--vault override is not allowed; run from the vault root")
     if not vault.exists() or not vault.is_dir():
         return fail("vault does not exist or is not a directory")
+    try:
+        json_path = checked_report_path(args.json_path, FIXED_JSON_REPORT, "JSON") if args.json_path else None
+        markdown_path = checked_report_path(args.markdown_path, FIXED_MARKDOWN_REPORT, "Markdown") if args.markdown_path else None
+    except ValueError as exc:
+        return fail(str(exc))
     convert = args.mode in {"prepare", "apply-duplicates"}
     report = make_report(vault, convert)
     if args.mode == "apply-duplicates":
         apply_duplicates(vault, report, args.date)
         if not args.no_log:
             append_log(vault, report, args.date, args.mode)
-    if args.json_path:
-        out = Path(args.json_path).resolve()
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    if args.markdown_path:
-        out = Path(args.markdown_path).resolve()
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(markdown_report(report), encoding="utf-8")
-    if not args.json_path and not args.markdown_path:
+    try:
+        if json_path:
+            write_report_file(json_path, json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+        if markdown_path:
+            write_report_file(markdown_path, markdown_report(report))
+    except ValueError as exc:
+        return fail(str(exc))
+    if not json_path and not markdown_path:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
 

@@ -77,6 +77,13 @@ Archive/
 .claude/skills/setup-brain/
 .claude/skills/organize-inbox/
 .claude/skills/optimize-vault/
+.codex/skills/setup-brain/
+.codex/skills/organize-inbox/
+.codex/skills/optimize-vault/
+.copilot/.github/plugin/
+.copilot/skills/setup-brain/
+.copilot/skills/organize-inbox/
+.copilot/skills/optimize-vault/
 ```
 
 空目录用 `.gitkeep` 保留。
@@ -158,7 +165,7 @@ Archive/
 1. 若已有 `copilot`，运行 `copilot --help` 验证可用。
 2. 若无 `copilot` 但有 `gh`，运行 `gh copilot --help` 验证 GitHub CLI 支持；可建议用户用 `gh copilot` 启动或下载 Copilot CLI。
 3. 登录、下载、更新或修改 Copilot 配置前必须确认。
-4. 说明 `.github/copilot-instructions.md` 是本仓库的 Copilot 指令文件；运行 `copilot init` 前应检查是否会覆盖已有定制内容。
+4. 说明 `.github/copilot-instructions.md` 是本仓库的 Copilot 指令文件，`.copilot/.github/plugin/plugin.json` 和 `.copilot/skills/*/SKILL.md` 是项目内 Copilot CLI plugin skills；运行 `copilot init` 前应检查是否会覆盖已有定制内容。
 
 如果用户启用 Codex CLI 支持：
 
@@ -176,7 +183,7 @@ Archive/
    ```
 
 4. 安装、登录或配置 API key 前必须确认。
-5. 说明 `AGENTS.md` 是通用 agent 指令文件，供 Codex CLI 和其他 agent 参考。
+5. 说明 `AGENTS.md` 是通用 agent 指令文件，`.codex/skills/*/SKILL.md` 是项目内 Codex skills，供 Codex CLI 和其他 agent 参考。
 
 ### 6. Wrapper 检查
 
@@ -185,19 +192,27 @@ Archive/
 ```bash
 test -x .claude/bin/safe-markitdown
 test -x .claude/bin/safe-whisper
+test -x .claude/bin/safe-mkdir
+test -x .claude/bin/safe-git-add
+test -x .claude/bin/safe-git-mv
+test -x .claude/bin/safe-git-commit
+test -x .claude/bin/organize-inbox-scan
+test -x .claude/bin/organize-inbox-prepare
+test -x .claude/bin/organize-inbox-apply-duplicates
 ```
 
 如不可执行，执行：
 
 ```bash
-chmod +x .claude/bin/safe-markitdown .claude/bin/safe-whisper .claude/organize.sh
+chmod +x .claude/bin/safe-markitdown .claude/bin/safe-whisper .claude/bin/safe-mkdir .claude/bin/safe-git-add .claude/bin/safe-git-mv .claude/bin/safe-git-commit .claude/bin/organize-inbox-scan .claude/bin/organize-inbox-prepare .claude/bin/organize-inbox-apply-duplicates .claude/organize.sh
 ```
 
 运行语法检查：
 
 ```bash
-python3 -m py_compile .claude/bin/safe-markitdown .claude/bin/safe-whisper
+python3 -m py_compile .claude/bin/safe-markitdown .claude/bin/safe-whisper .claude/bin/safe-mkdir .claude/bin/safe-git-add .claude/bin/safe-git-mv .claude/bin/safe-git-commit .claude/bin/organize-inbox-scan .claude/bin/organize-inbox-prepare .claude/bin/organize-inbox-apply-duplicates
 zsh -n .claude/organize.sh
+python3 -m json.tool .copilot/.github/plugin/plugin.json >/tmp/brain-vault-plugin-json-check.out
 ```
 
 ### 7. 可选自动整理
@@ -222,5 +237,5 @@ git status --short
 
 - 已初始化的身份层段落。
 - 工具状态：`markitdown` 已安装/未安装，`whisper` 已安装/未安装，`ffmpeg` 已安装/未安装，Whisper 默认模型/模型下载提醒，`copilot` 已安装/未安装，`codex` 已安装/未安装。
-- 已启用能力：Markdown 整理、文档/数据/网页/Notebook 转换、截图占位、音视频转录、已整理笔记优化、Copilot CLI 指令、Codex/通用 agent 指令。
+- 已启用能力：Markdown 整理、文档/数据/网页/Notebook 转换、截图占位、音视频转录、已整理笔记优化、Copilot CLI 指令与 plugin skills、Codex/通用 agent 指令与项目内 skills。
 - 下一步：把资料放入 `Inbox/`，运行 `/organize-inbox`；需要体检已整理笔记时运行 `/optimize-vault`。

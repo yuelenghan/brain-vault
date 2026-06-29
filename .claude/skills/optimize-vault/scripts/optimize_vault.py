@@ -20,6 +20,9 @@ TRACKING_PARAMS = {"fbclid", "gclid", "msclkid", "dclid", "igshid"}
 TRACKING_PREFIXES = ("utm_",)
 WIKILINK_RE = re.compile(r"!?(?<!\!)\[\[([^\]]+)\]\]")
 URL_RE = re.compile(r"https?://[^\s)\]}>\"']+")
+FIXED_REPORT_DIR = Path("/tmp").resolve()
+FIXED_JSON_REPORT = FIXED_REPORT_DIR / "optimize-vault.json"
+FIXED_MARKDOWN_REPORT = FIXED_REPORT_DIR / "optimize-vault.md"
 
 
 @dataclass
@@ -32,6 +35,8 @@ class Note:
     wikilinks: list[str]
     normalized_urls: list[str]
     fingerprint: str
+    stored_fingerprint: str | None
+    fingerprint_valid: bool
     content_length: int
     has_summary: bool
     inbound_count: int = 0
@@ -231,7 +236,8 @@ def read_note(vault: Path, path: Path, protected: set[str]) -> Note:
     frontmatter, aliases, body = parse_frontmatter(text)
     title = frontmatter.get("title") or heading_title(body) or path.stem
     links = [wikilink_target(raw) for raw in WIKILINK_RE.findall(text)]
-    fingerprint = frontmatter.get("content_fingerprint") or content_fingerprint(text)
+    computed_fingerprint = content_fingerprint(text)
+    stored_fingerprint = frontmatter.get("content_fingerprint")
     urls = extract_urls(frontmatter, text)
     return Note(
         path=rel,
@@ -241,7 +247,9 @@ def read_note(vault: Path, path: Path, protected: set[str]) -> Note:
         frontmatter=frontmatter,
         wikilinks=links,
         normalized_urls=urls,
-        fingerprint=fingerprint,
+        fingerprint=computed_fingerprint,
+        stored_fingerprint=stored_fingerprint,
+        fingerprint_valid=not stored_fingerprint or stored_fingerprint == computed_fingerprint,
         content_length=len(normalize_body_for_hash(text)),
         has_summary="## 提炼" in text or "## 摘要" in text,
         outbound_count=len(links),
@@ -278,14 +286,22 @@ def canonical_score(note: Note) -> tuple[int, int, int, int, int, str]:
 
 def duplicate_groups(notes: list[Note]) -> list[dict]:
     candidates: dict[tuple[str, str], list[Note]] = defaultdict(list)
+    source_file_candidates: dict[str, list[Note]] = defaultdict(list)
     for note in notes:
         for url in note.normalized_urls:
             candidates[("url", url)].append(note)
-        if note.fingerprint:
+        if note.fingerprint and note.fingerprint_valid:
             candidates[("fingerprint", note.fingerprint)].append(note)
         source_file = note.frontmatter.get("source_file")
         if source_file:
-            candidates[("source_file", source_file)].append(note)
+            source_file_candidates[source_file].append(note)
+    for source_file, group in source_file_candidates.items():
+        by_fingerprint: dict[str, list[Note]] = defaultdict(list)
+        for note in group:
+            by_fingerprint[note.fingerprint].append(note)
+        for fingerprint, same_body in by_fingerprint.items():
+            if len(same_body) > 1:
+                candidates[("source_file", f"{source_file}#{fingerprint}")].extend(same_body)
 
     grouped: dict[tuple[str, ...], dict] = {}
     for (kind, value), group in candidates.items():
@@ -343,6 +359,19 @@ def orphan_notes(notes: list[Note]) -> list[str]:
     return sorted(note.path for note in notes if note.inbound_count == 0 and note.outbound_count == 0 and note.path.startswith("Resources/"))
 
 
+def invalid_fingerprints(notes: list[Note]) -> list[dict]:
+    return [
+        {
+            "path": note.path,
+            "stored": note.stored_fingerprint,
+            "computed": note.fingerprint,
+            "reason": "stale_or_invalid_fingerprint",
+        }
+        for note in notes
+        if not note.fingerprint_valid
+    ]
+
+
 def coverage(notes: list[Note]) -> dict:
     distribution = Counter(note.path.split("/", 1)[0] for note in notes)
     return {
@@ -350,6 +379,7 @@ def coverage(notes: list[Note]) -> dict:
         "distribution": dict(sorted(distribution.items())),
         "source_url_or_canonical": sum(1 for note in notes if note.normalized_urls),
         "content_fingerprint": sum(1 for note in notes if note.frontmatter.get("content_fingerprint")),
+        "invalid_fingerprint": sum(1 for note in notes if not note.fingerprint_valid),
     }
 
 
@@ -520,6 +550,7 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
         "broken_links": broken_links(notes, by_name),
         "metadata_missing": metadata_missing(notes),
         "orphan_notes": orphan_notes(notes),
+        "invalid_fingerprints": invalid_fingerprints(notes),
         "applied": {"duplicates": [], "metadata": [], "broken_links": []},
         "report_only": {"suspected_duplicates": [], "structure_suggestions": []},
         "skipped_uncertain": [],
@@ -528,6 +559,8 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
     for item in report["broken_links"]:
         if item["status"] != "unique":
             report["skipped_uncertain"].append({"type": "ambiguous_broken_link", **item})
+    for item in report["invalid_fingerprints"]:
+        report["skipped_uncertain"].append({"type": "stale_or_invalid_fingerprint", **item})
     return report
 
 
@@ -559,10 +592,11 @@ def markdown_report(report: dict) -> str:
         [*protected_items, *evidence_items],
         lambda item: f"{item.get('type')}: `{item.get('path') or item.get('source') or item.get('link')}`",
     )
+    invalid_count = len(report.get("invalid_fingerprints", []))
     lines = [
         "## 范围与扫描结果",
         f"- 范围：{', '.join(report['scope'])}",
-        f"- 扫描：{coverage_data['markdown_count']} 篇 Markdown；目录分布 {coverage_data['distribution']}；来源 URL 覆盖 {coverage_data['source_url_or_canonical']}；指纹覆盖 {coverage_data['content_fingerprint']}",
+        f"- 扫描：{coverage_data['markdown_count']} 篇 Markdown；目录分布 {coverage_data['distribution']}；来源 URL 覆盖 {coverage_data['source_url_or_canonical']}；指纹覆盖 {coverage_data['content_fingerprint']}；指纹不一致 {invalid_count}",
         "",
         "## 已自动处理",
         f"- 重复归档：{len(report['applied']['duplicates']) or '无'}",
@@ -601,13 +635,34 @@ def safe_self_check(vault: Path, report: dict) -> None:
     report["verification"]["self_check"] = "通过" if not bad_delete and not duplicate_missing else "未通过"
 
 
+def checked_report_path(raw: str, expected: Path, label: str) -> Path:
+    out = Path(raw).resolve()
+    if out != expected:
+        raise ValueError(f"{label} report path must be /tmp/{expected.name}")
+    if out.exists() and out.is_symlink():
+        raise ValueError(f"{label} report path must not be a symlink")
+    return out
+
+
+def write_report_file(path: Path, content: str) -> None:
+    if path.parent != FIXED_REPORT_DIR:
+        raise ValueError("report parent must be /tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise ValueError(f"failed to open report path safely: {exc}") from exc
+    with os.fdopen(fd, "w", encoding="utf-8") as out:
+        out.write(content)
+
+
 def write_outputs(report: dict, json_path: Path | None, markdown_path: Path | None) -> None:
     if json_path:
-        json_path.parent.mkdir(parents=True, exist_ok=True)
-        json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        write_report_file(json_path, json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     if markdown_path:
-        markdown_path.parent.mkdir(parents=True, exist_ok=True)
-        markdown_path.write_text(markdown_report(report), encoding="utf-8")
+        write_report_file(markdown_path, markdown_report(report))
 
 
 def main(argv: list[str]) -> int:
@@ -622,8 +677,16 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     vault = Path(args.vault).resolve()
+    cwd = Path.cwd().resolve()
+    if vault != cwd:
+        return fail("--vault override is not allowed; run from the vault root")
     if not vault.exists() or not vault.is_dir():
         return fail("vault does not exist or is not a directory")
+    try:
+        json_path = checked_report_path(args.json_path, FIXED_JSON_REPORT, "JSON") if args.json_path else None
+        markdown_path = checked_report_path(args.markdown_path, FIXED_MARKDOWN_REPORT, "Markdown") if args.markdown_path else None
+    except ValueError as exc:
+        return fail(str(exc))
     scopes = args.scope or list(DEFAULT_SCOPES)
     for scope in scopes:
         scope_path = (vault / scope).resolve()
@@ -647,12 +710,11 @@ def main(argv: list[str]) -> int:
         report["verification"]["git_status"] = "scan 模式未修改"
         report["verification"]["self_check"] = "通过"
 
-    write_outputs(
-        report,
-        Path(args.json_path).resolve() if args.json_path else None,
-        Path(args.markdown_path).resolve() if args.markdown_path else None,
-    )
-    if not args.json_path and not args.markdown_path:
+    try:
+        write_outputs(report, json_path, markdown_path)
+    except ValueError as exc:
+        return fail(str(exc))
+    if not json_path and not markdown_path:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
 

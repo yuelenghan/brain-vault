@@ -45,7 +45,9 @@ python3 .claude/skills/optimize-vault/scripts/optimize_vault.py \
 - 用户说“只分析 / 只报告”时只能用 `--mode scan`。
 - 用户说“优化 vault”且没有禁止修改时，必须优先用 `--mode apply-safe`；脚本会先做确定性低风险修改。
 - 用户指定主题或目录时，给脚本追加一个或多个 `--scope <目录>`。
+- 脚本输出 JSON / Markdown 固定为 `/tmp/optimize-vault.json` 和 `/tmp/optimize-vault.md`；不要传其他 report 路径，不要传 `--vault`，必须从 vault 根目录运行。
 - 脚本输出 JSON 是主要事实来源；最终回答前必须 Read `/tmp/optimize-vault.md` 或 JSON 摘要。
+- 脚本只信任重新计算的正文指纹；若报告 `invalid_fingerprints` / `stale_or_invalid_fingerprint`，不得基于这些 frontmatter 旧指纹自动去重，优先报告或人工清理。
 - 跑完脚本后，继续检查报告里的孤岛笔记、承接缺口、主题索引缺口和高置信语义补链；只要非 protected、证据明确、改动小，就直接修复并记录，不要停留在“建议”。
 - 若 `apply-safe` 没有产生改动但 protected paths 很多，不要误判为失败；说明脚本为了保护用户已有未提交改动而跳过，并给出下一步：提交/清理这些改动后重跑，或用 `--scope <目录>` 缩小范围。
 - 若脚本报错，先报告错误，不要退回到模型手工大规模改库。
@@ -57,7 +59,7 @@ python3 .claude/skills/optimize-vault/scripts/optimize_vault.py \
 - 扫描 `Projects/`、`Areas/`、`Resources/`、`Archive/` 下 Markdown，忽略 `Inbox/`、workspace 和日志。
 - 解析 frontmatter、标题、aliases、`source_url` / `canonical_url` / `source_file` / `content_fingerprint`、`[[双链]]`。
 - 规范化 URL、计算缺失内容指纹、统计覆盖率和孤岛笔记。
-- 检测完全重复：相同规范化 URL、相同 `content_fingerprint`、相同 `source_file`。
+- 检测完全重复：相同规范化 URL、相同重新计算的 `content_fingerprint`、或相同 `source_file` 且正文指纹一致；frontmatter 中的旧指纹不作为自动依据。
 - 用启发式选择 canonical：`Resources/` 优先、有提炼、入链多、正文更完整、非 `Archive/Duplicates/` 优先。
 - 检测失效链接；唯一匹配时可自动修复，多候选时只报告。
 - `apply-safe` 下执行：元数据补全、完全重复 `git mv` 归档、唯一失效链接修复、写 `.claude/optimize-vault.log`。
@@ -81,8 +83,8 @@ python3 .claude/skills/optimize-vault/scripts/optimize_vault.py \
 满足任一条件：
 
 - 相同规范化 `source_url` / `canonical_url`
-- 相同 `content_fingerprint`
-- 同一原始 `source_file` 且正文等价
+- 相同重新计算的正文 `content_fingerprint`
+- 同一原始 `source_file` 且正文指纹一致
 
 处理方式：
 

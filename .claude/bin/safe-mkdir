@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""Safe mkdir -p wrapper for brain-vault organize work."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+ALLOWED_ROOTS = {"Projects", "Areas", "Resources", "Archive"}
+
+
+def valid_path(raw: str) -> bool:
+    if raw.startswith("-"):
+        return False
+    path = Path(raw)
+    if path.is_absolute() or ".." in path.parts:
+        return False
+    parts = path.parts
+    return bool(parts) and parts[0] in ALLOWED_ROOTS
+
+
+def main(argv: list[str]) -> int:
+    if not argv:
+        print("safe-mkdir: expected at least one directory", file=sys.stderr)
+        return 2
+    bad = [arg for arg in argv if not valid_path(arg)]
+    if bad:
+        print(f"safe-mkdir: disallowed path: {bad[0]}", file=sys.stderr)
+        return 2
+    for raw in argv:
+        Path(raw).mkdir(parents=True, exist_ok=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

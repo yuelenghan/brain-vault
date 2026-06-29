@@ -41,9 +41,13 @@ python3 .claude/skills/organize-inbox/scripts/organize_inbox.py \
   --date <YYYY-MM-DD>
 ```
 
+headless / allowlist 受限环境中改用固定 wrapper：`.claude/bin/organize-inbox-scan`、`.claude/bin/organize-inbox-prepare`、`.claude/bin/organize-inbox-apply-duplicates <YYYY-MM-DD>`。
+
 - 用户只要求分析时，用 `scan`。
 - 正常整理 Inbox 时，先用 `prepare`；若报告中有完全重复，再用 `apply-duplicates` 处理重复项。
+- 脚本输出 JSON / Markdown 固定为 `/tmp/organize-inbox.json` 和 `/tmp/organize-inbox.md`；不要传其他 report 路径，不要传 `--vault`，必须从 vault 根目录运行。
 - 脚本输出 JSON / Markdown 是文件类型、转换结果、来源指纹和完全重复判断的事实来源；继续整理前必须 Read `/tmp/organize-inbox.md` 或 JSON 摘要。
+- 脚本只信任重新计算的正文指纹；若报告 `invalid_fingerprints`，不得基于这些 frontmatter 旧指纹自动判重，优先报告或人工清理。
 - 若脚本报错，先报告错误，不要退回到模型手工大规模改库。
 
 ### 2. 预检与保护
@@ -123,7 +127,7 @@ python3 .claude/skills/organize-inbox/scripts/organize_inbox.py \
 
 ### 8. 移动与暂存
 
-固定流程：必要时 `mkdir -p <目标目录>` → `git add <原 Inbox 文件>`（先跟踪新笔记）→ `git mv <原文件> <目标>` → Edit 整理内容 → `git add <目标>`。
+固定流程：必要时 `mkdir -p <目标目录>` → `git add <原 Inbox 文件>`（先跟踪新笔记）→ `git mv <原文件> <目标>` → Edit 整理内容 → `git add <目标>`。headless / allowlist 受限环境中，用 `.claude/bin/safe-mkdir`、`.claude/bin/safe-git-add`、`.claude/bin/safe-git-mv` 和 `.claude/bin/safe-git-commit` 替代直接 `mkdir` / `git add` / `git mv` / `git commit`。
 
 禁止：
 

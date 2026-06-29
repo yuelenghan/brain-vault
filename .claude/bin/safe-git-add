@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""Safe git add wrapper for brain-vault organize work."""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+
+ALLOWED_PREFIXES = ("Inbox/", "Projects/", "Areas/", "Resources/", "Archive/")
+ALLOWED_EXACT = {".claude/organize.log", ".claude/optimize-vault.log"}
+
+
+def valid_path(raw: str) -> bool:
+    if raw.startswith("-"):
+        return False
+    path = Path(raw)
+    if path.is_absolute() or ".." in path.parts:
+        return False
+    rel = path.as_posix()
+    return rel in ALLOWED_EXACT or any(rel.startswith(prefix) for prefix in ALLOWED_PREFIXES)
+
+
+def main(argv: list[str]) -> int:
+    if not argv:
+        print("safe-git-add: expected at least one path", file=sys.stderr)
+        return 2
+    bad = [arg for arg in argv if not valid_path(arg)]
+    if bad:
+        print(f"safe-git-add: disallowed path: {bad[0]}", file=sys.stderr)
+        return 2
+    return subprocess.run(["git", "add", *argv], check=False).returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

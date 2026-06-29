@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+"""Run the organize-inbox scanner with fixed report paths."""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+
+SCRIPT = Path(".claude/skills/organize-inbox/scripts/organize_inbox.py")
+JSON_REPORT = "/tmp/organize-inbox.json"
+MARKDOWN_REPORT = "/tmp/organize-inbox.md"
+
+
+def main(argv: list[str]) -> int:
+    if argv:
+        print("organize-inbox-scan: arguments are not allowed", file=sys.stderr)
+        return 2
+    return subprocess.run(
+        [
+            "python3",
+            str(SCRIPT),
+            "--mode",
+            "scan",
+            "--json",
+            JSON_REPORT,
+            "--markdown",
+            MARKDOWN_REPORT,
+        ],
+        check=False,
+    ).returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
