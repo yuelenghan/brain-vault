@@ -47,8 +47,8 @@
 ## 工具层级
 
 - Level 1：纯 Markdown 整理，无额外本机工具。
-- Level 2：文档转换，依赖 `markitdown`，用于 `.doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf`。
-- Level 3：音频转录，依赖 `whisper`、`ffmpeg` 和首次转录时下载的 Whisper 模型，用于 `.mp3/.m4a/.wav/.mp4/.mov/.aac/.flac/.ogg/.opus/.webm`。
+- Level 2：文档、数据、网页、电子书、Notebook 和截图转换；文档/数据/网页/电子书/Notebook 依赖 `markitdown`，用于 `.doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf/.txt/.text/.markdown/.csv/.json/.jsonl/.html/.htm/.epub/.ipynb`；截图占位依赖 `Pillow`，用于 `.png/.jpg/.jpeg/.webp`。
+- Level 3：音视频转录，依赖 `whisper`、`ffmpeg` 和首次转录时下载的 Whisper 模型，用于 `.mp3/.m4a/.wav/.mp4/.mov/.aac/.aiff/.flac/.ogg/.opus/.webm`。
 - AI CLI：Claude Code 提供完整 skill 体验；Copilot CLI 读取 `.github/copilot-instructions.md`；Codex CLI 和其他 agent 可读取 `AGENTS.md`。
 
 ## 项目级坑点

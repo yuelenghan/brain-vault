@@ -1,6 +1,6 @@
 ---
 name: setup-brain
-description: 初始化 brain-vault：采访用户身份和目标，生成 CLAUDE.md，检查 PARA 目录、git 状态、本机转换工具（markitdown、whisper、ffmpeg）和 AI CLI（copilot、codex），并按用户确认安装缺失工具。
+description: 初始化 brain-vault：采访用户身份和目标，生成 CLAUDE.md，检查 PARA 目录、git 状态、本机转换工具（markitdown、Pillow、whisper、ffmpeg）和 AI CLI（copilot、codex），并按用户确认安装缺失工具。
 ---
 
 # Setup Brain
@@ -45,8 +45,8 @@ command -v python3 || true
 2. 今年或近期最重要的目标是什么？
 3. 当前活跃项目有哪些？每个项目一句话说明。
 4. 你希望 Claude 如何协作？例如是否偏好简洁结论、详细推理、自动执行、谨慎确认等。
-5. 计划整理哪些文件格式？是否启用文档转换能力（Word/PDF/PPT/Excel/PDF → Markdown）？
-6. 是否启用音频转录能力（音视频 → Markdown）？如果启用，是否接受首次真实转录时下载 Whisper 模型，是否需要指定模型或语言？
+5. 计划整理哪些文件格式？是否启用文档/数据/网页/Notebook 转换能力（Word/PDF/PPT/Excel/TXT/CSV/JSON/HTML/EPUB/IPYNB → Markdown）和截图占位能力（图片 → Markdown 占位）？
+6. 是否启用音视频转录能力（音视频 → Markdown）？如果启用，是否接受首次真实转录时下载 Whisper 模型，是否需要指定模型或语言？
 7. 是否需要 Copilot CLI 或 Codex CLI 支持？
 8. 是否需要离线自动整理？如果需要，偏好手动运行 `organize.sh`、系统 crontab/launchd，还是 Claude Code 会话内定时？
 
@@ -84,8 +84,9 @@ Archive/
 
 #### 基础检测
 
-- `markitdown`：用于 `.doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf` 转 Markdown。
-- `whisper`：用于 `.mp3/.m4a/.wav/.mp4/.mov/.aac/.flac/.ogg/.opus/.webm` 转 Markdown。
+- `markitdown`：用于 `.doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf/.txt/.text/.markdown/.csv/.json/.jsonl/.html/.htm/.epub/.ipynb` 转 Markdown。
+- `Pillow`：用于 `.png/.jpg/.jpeg/.webp` 生成截图占位 Markdown。
+- `whisper`：用于 `.mp3/.m4a/.wav/.mp4/.mov/.aac/.aiff/.flac/.ogg/.opus/.webm` 转 Markdown。
 - `ffmpeg`：Whisper 解码音视频所需的本机依赖。
 - Whisper 模型：首次真实转录可能下载默认模型；用 `whisper --help` 验证当前默认模型和 `--model` 参数，必要时通过 `WHISPER_MODEL` 指定。
 - `copilot` / `gh copilot`：用于 GitHub Copilot CLI。
@@ -220,5 +221,5 @@ git status --short
 
 - 已初始化的身份层段落。
 - 工具状态：`markitdown` 已安装/未安装，`whisper` 已安装/未安装，`ffmpeg` 已安装/未安装，Whisper 默认模型/模型下载提醒，`copilot` 已安装/未安装，`codex` 已安装/未安装。
-- 已启用能力：Markdown 整理、文档转换、音频转录、Copilot CLI 指令、Codex/通用 agent 指令。
+- 已启用能力：Markdown 整理、文档/数据/网页/Notebook 转换、截图占位、音视频转录、Copilot CLI 指令、Codex/通用 agent 指令。
 - 下一步：把资料放入 `Inbox/`，运行 `/organize-inbox`。

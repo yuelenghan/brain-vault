@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Safely convert a vault Inbox document to Markdown using MarkItDown."""
+"""Safely convert a vault Inbox document or screenshot to Markdown."""
 
 from __future__ import annotations
 
@@ -9,8 +9,15 @@ import sys
 import tempfile
 from pathlib import Path
 
+try:
+    from PIL import Image, UnidentifiedImageError
+except ImportError:
+    Image = None
+    UnidentifiedImageError = Exception
+
 
 TRUSTED_CWD = "/usr/bin"
+IMAGE_EXTENSIONS = {".jpeg", ".jpg", ".png", ".webp"}
 
 
 def fail(message: str) -> int:
@@ -40,6 +47,49 @@ def resolve_vault() -> Path:
     if os.environ.get("VAULT"):
         return Path(os.environ["VAULT"]).resolve()
     return Path.cwd().resolve()
+
+
+def write_image_markdown(candidate: Path, temp_path: Path) -> int:
+    if Image is None:
+        return fail("Pillow is not installed")
+
+    try:
+        with Image.open(candidate) as image:
+            image.load()
+            image_format = image.format or candidate.suffix.lstrip(".").upper()
+            width, height = image.size
+    except UnidentifiedImageError:
+        return fail("image file is not readable")
+    except OSError as exc:
+        return fail(f"failed to read image: {exc}")
+
+    temp_path.write_text(
+        f"# {candidate.stem}\n\n"
+        f"> 截图笔记占位，原始文件：`Inbox/{candidate.name}`。\n\n"
+        "## 图片信息\n\n"
+        f"- 文件：`Inbox/{candidate.name}`\n"
+        f"- 格式：{image_format}\n"
+        f"- 尺寸：{width} × {height}\n\n"
+        "## 待整理\n\n"
+        "请结合原始截图内容提炼主题、关键信息和后续动作。\n",
+        encoding="utf-8",
+    )
+    return 0
+
+
+def run_markitdown(candidate: Path, temp_path: Path, env: dict[str, str]) -> int:
+    command = ["markitdown", str(candidate), "-o", str(temp_path)]
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            cwd=TRUSTED_CWD,
+            env=env,
+        )
+    except OSError as exc:
+        print(f"safe-markitdown: failed to execute markitdown: {exc}", file=sys.stderr)
+        return 127
+    return completed.returncode
 
 
 def main(argv: list[str]) -> int:
@@ -79,24 +129,20 @@ def main(argv: list[str]) -> int:
     os.close(fd)
     temp_path = Path(temp_name)
 
-    command = ["markitdown", str(candidate), "-o", str(temp_path)]
     try:
-        completed = subprocess.run(
-            command,
-            check=False,
-            cwd=TRUSTED_CWD,
-            env=clean_environment(),
-        )
-        if completed.returncode != 0:
-            return completed.returncode
+        env = clean_environment()
+        if candidate.suffix.lower() in IMAGE_EXTENSIONS:
+            return_code = write_image_markdown(candidate, temp_path)
+        else:
+            return_code = run_markitdown(candidate, temp_path, env)
+
+        if return_code != 0:
+            return return_code
         if not temp_path.is_file() or temp_path.is_symlink() or temp_path.stat().st_size == 0:
-            return fail("markitdown output is empty or invalid")
+            return fail("conversion output is empty or invalid")
         if os.path.lexists(output):
             return fail(f"output appeared during conversion: Inbox/{out_name}")
         os.replace(temp_path, output)
-    except OSError as exc:
-        print(f"safe-markitdown: failed to execute markitdown: {exc}", file=sys.stderr)
-        return 127
     finally:
         try:
             if temp_path.exists() or temp_path.is_symlink():

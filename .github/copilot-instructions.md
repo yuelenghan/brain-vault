@@ -28,8 +28,9 @@ This repository is a personal knowledge vault template, not an application codeb
 
 ## Tooling
 
-- `markitdown` is optional and converts `.doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf` to Markdown through `.claude/bin/safe-markitdown`.
-- `whisper` is optional and transcribes `.mp3/.m4a/.wav/.mp4/.mov/.aac/.flac/.ogg/.opus/.webm` through `.claude/bin/safe-whisper`.
+- `markitdown` is optional and converts documents, data exports, webpages, ebooks, and notebooks (`.doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf/.txt/.text/.markdown/.csv/.json/.jsonl/.html/.htm/.epub/.ipynb`) to Markdown through `.claude/bin/safe-markitdown`.
+- `Pillow` is optional and lets `.claude/bin/safe-markitdown` create screenshot placeholder Markdown for `.png/.jpg/.jpeg/.webp`.
+- `whisper` is optional and transcribes `.mp3/.m4a/.wav/.mp4/.mov/.aac/.aiff/.flac/.ogg/.opus/.webm` through `.claude/bin/safe-whisper`.
 - Cloning this repository does not install these tools.
 
 ## Working style

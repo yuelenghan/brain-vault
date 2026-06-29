@@ -26,7 +26,8 @@ brain-vault helps a user collect, organize, and maintain personal knowledge with
 
 ## Optional local tools
 
-- `markitdown`: document-to-Markdown conversion. Use through `.claude/bin/safe-markitdown` when available.
+- `markitdown`: document, data export, webpage, ebook, and notebook to Markdown conversion. Use through `.claude/bin/safe-markitdown` when available.
+- `Pillow`: screenshot placeholder Markdown generation through `.claude/bin/safe-markitdown`.
 - `whisper`: audio/video transcription. Use through `.claude/bin/safe-whisper` when available.
 
 Cloning the repository does not install optional tools.
