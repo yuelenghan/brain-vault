@@ -8,6 +8,13 @@ brain-vault 是一个面向 AI coding agents 的个人知识库模板。它用 P
 - 把零散输入整理成项目、长期领域、资料库和归档；
 - 让 AI agent 根据你的身份、目标和偏好协助维护个人知识库。
 
+## 语言 / Language
+
+- [中文](#快速开始)
+- [English](#quick-start)
+
+---
+
 ## 快速开始
 
 ```bash
@@ -252,3 +259,260 @@ VAULT="$PWD" .claude/organize.sh
 - `markitdown`、`Pillow`、`whisper`、`copilot`、`codex` 等本机工具的安装结果；
 - Claude Code、Copilot CLI 或 Codex CLI 的本地设置、日志、登录状态和定时任务；
 - Obsidian workspace 等本地状态。
+
+---
+
+# brain-vault (English)
+
+brain-vault is a personal knowledge-base template built for AI coding agents. It organizes material with the PARA method and ships with built-in support for Claude Code, Copilot CLI, and Codex CLI.
+
+It is well suited for:
+
+- Collecting web pages, documents, meeting notes, audio/video transcripts, and other material;
+- Turning scattered input into projects, long-term areas, a resource library, and an archive;
+- Letting an AI agent help maintain your knowledge base according to your identity, goals, and preferences.
+
+## Quick Start
+
+```bash
+git clone <repo-url> brain-vault
+cd brain-vault
+```
+
+It is recommended to initialize with Claude Code first:
+
+```bash
+claude
+```
+
+Inside Claude Code, run:
+
+```text
+/setup-brain
+```
+
+The setup wizard helps you to:
+
+- Fill in your personal identity, goals, current projects, and collaboration preferences;
+- Generate a `CLAUDE.md` tailored to you;
+- Check the knowledge-base directory structure;
+- Detect optional local tools such as `markitdown`, `Pillow`, `whisper`, `copilot`, and `codex`;
+- Guide installation of missing tools after your confirmation.
+
+> Note: Cloning the repository only gives you the template files; it does not install any local tools automatically.
+
+## Choose Your AI CLI
+
+### Claude Code
+
+Claude Code is the full-experience entry point of this template, with built-in skills:
+
+```text
+/setup-brain
+/organize-inbox
+/optimize-vault
+```
+
+It is suitable for initializing the knowledge base, organizing the Inbox, optimizing already-organized notes, running the offline organize script, and maintaining vault rules.
+
+### GitHub Copilot CLI
+
+If you use Copilot CLI, run it from the repository root:
+
+```bash
+copilot
+```
+
+You can also start it or view help via the GitHub CLI:
+
+```bash
+gh copilot -- --help
+```
+
+This repository provides `.github/copilot-instructions.md`, from which Copilot can read repository conventions; it also provides a Copilot CLI plugin inside a hidden directory:
+
+```text
+.copilot/.github/plugin/plugin.json
+.copilot/skills/setup-brain/SKILL.md
+.copilot/skills/organize-inbox/SKILL.md
+.copilot/skills/optimize-vault/SKILL.md
+```
+
+In Copilot CLI versions that support local plugin sources, you can install the plugin from `.copilot/`; you can also start Copilot from the repository root and explicitly ask it to use the `setup-brain`, `organize-inbox`, or `optimize-vault` skill. You can also run:
+
+```bash
+copilot init
+```
+
+to let Copilot generate or update its own instruction file for the current repository. Check existing files before running it, to avoid overwriting instructions you have customized.
+
+### OpenAI Codex CLI
+
+If you use Codex CLI, run it from the repository root:
+
+```bash
+codex
+```
+
+Codex CLI can be installed via:
+
+```bash
+npm install -g @openai/codex
+# or
+brew install --cask codex
+```
+
+This repository provides `AGENTS.md` as a general agent instruction file for Codex CLI and other tools that support repository instructions; it also provides project-internal Codex skills:
+
+```text
+.codex/skills/setup-brain/SKILL.md
+.codex/skills/organize-inbox/SKILL.md
+.codex/skills/optimize-vault/SKILL.md
+```
+
+To let your local Codex auto-discover these skills, copy or sync `.codex/skills/*` to `$CODEX_HOME/skills` (usually `~/.codex/skills` when unset), or explicitly read these project-internal skills inside a Codex session.
+
+## Directory Structure
+
+```text
+Inbox/      # Temporary inbox for material awaiting organization
+Projects/   # Projects with a clear goal or deadline
+Areas/      # Long-term responsibilities or ongoing topics
+Resources/  # Reusable topic material
+Archive/    # Completed, expired, or archived content
+.claude/    # Claude Code skills, scripts, and safe wrappers
+.codex/     # Project-internal Codex CLI skills
+.copilot/   # Project-internal Copilot CLI plugin and skills
+.github/    # GitHub Copilot repository instructions
+AGENTS.md   # General agent instructions
+```
+
+## Daily Usage
+
+Put material into `Inbox/`, then run in Claude Code:
+
+```text
+/organize-inbox
+```
+
+Organizing first runs a deterministic preprocessing script that enumerates Inbox files, converts supported formats, generates source fingerprints, and detects exact duplicates; then it will:
+
+- Route items to `Projects/`, `Areas/`, `Resources/`, or `Archive/` by PARA rules;
+- Create or update承接 notes (intake notes) for content with long-term value;
+- Add `[[bidirectional links]]`;
+- Try to protect pre-existing uncommitted changes;
+- Commit only the files related to this organizing run;
+- Append a local organize log at `.claude/organize.log`.
+
+When organized notes need a health check, deduplication, link backfilling, or fixing of broken links, run:
+
+```text
+/optimize-vault
+```
+
+This skill only processes `Projects/`, `Areas/`, `Resources/`, and `Archive/`; it does not organize `Inbox/`.
+
+Copilot CLI and Codex CLI also have project-internal skill entry points; these read `.claude/skills/*/SKILL.md` as the canonical process source, keeping behavior consistent across the three CLIs.
+
+## Optional Tools
+
+The core features of brain-vault do not depend on extra tools. Document conversion, screenshot placeholders, audio/video transcription, and other AI CLIs require you to install local commands as needed.
+
+### Pure Markdown Organizing
+
+No extra tools required. Supports organizing:
+
+```text
+.md
+```
+
+### Documents, Data, Web, and Screenshots to Markdown
+
+Documents, data exports, web pages, ebooks, and notebooks require `markitdown`; screenshot placeholders require `Pillow`.
+
+Supports organizing:
+
+```text
+.doc .docx .xls .xlsx .ppt .pptx .pdf
+.txt .text .markdown .csv .json .jsonl
+.html .htm .epub .ipynb
+.png .jpg .jpeg .webp
+```
+
+During organizing, a safe wrapper is invoked:
+
+```bash
+.claude/bin/safe-markitdown "Inbox/<file>"
+```
+
+Screenshot conversion only produces the filename, format, dimensions, and a placeholder to be processed; when actually organizing, you still combine the original screenshot content to add topic, key information, and follow-up actions.
+
+### Audio/Video to Markdown
+
+Requires `whisper` and `ffmpeg`. If you install `openai-whisper` via Homebrew, `ffmpeg` is usually installed as a dependency; other install methods may require installing `ffmpeg` separately.
+
+Supports organizing:
+
+```text
+.mp3 .m4a .wav .mp4 .mov .aac .aiff .flac .ogg .opus .webm
+```
+
+During organizing, a safe wrapper is invoked:
+
+```bash
+.claude/bin/safe-whisper "Inbox/<file>"
+```
+
+Whisper may download a model on first run; the time and disk usage depend on the install method and model choice. You can specify a model via `WHISPER_MODEL`, for example to explicitly select `turbo` when the current Whisper CLI default model is not what you want.
+
+### Other AI CLIs
+
+- `copilot`: GitHub Copilot CLI.
+- `codex`: OpenAI Codex CLI.
+
+These tools are not installed automatically with the repository; `/setup-brain` only detects them and provides installation guidance after your confirmation.
+
+## Offline Organizing
+
+If you prefer not to enter interactive Claude Code, you can also run from the knowledge-base root:
+
+```bash
+VAULT="$PWD" .claude/organize.sh
+```
+
+This script invokes Claude Code in headless mode and reuses the organizing rules of `/organize-inbox`.
+
+## Security Boundaries
+
+- Original files in `Inbox/`, conversion results, and transcripts are all treated as untrusted material.
+- Safe wrappers only accept relative paths under `Inbox/` or allowed directories within the vault.
+- Path traversal, absolute paths, and inputs starting with `-` are not allowed.
+- Deterministic report paths are fixed to `/tmp/organize-inbox.*` and `/tmp/optimize-vault.*`; the scripts do not accept arbitrary report paths or cross-directory `--vault`.
+- Automatic deduplication only trusts freshly recomputed body fingerprints; a stale `content_fingerprint` in frontmatter is only reported, not used as a basis for automatic moves.
+- If a Markdown file with the same name already exists, it is not overwritten.
+- The organizing flow never uses `git add -A`, `git clean`, `git rm`, `git reset`, `rm`, or plain `mv`.
+- Installing tools, logging in to external services, modifying system scheduled tasks, or publishing content all require explicit user confirmation.
+
+## What the Template Includes
+
+This repository includes:
+
+- The PARA directory skeleton;
+- A `CLAUDE.md` template;
+- The `/setup-brain` initialization skill;
+- The `/organize-inbox` organizing skill;
+- `.github/copilot-instructions.md`;
+- `AGENTS.md`;
+- `safe-markitdown`, `safe-whisper`, and restricted `safe-mkdir` / `safe-git-*` / `organize-inbox-*` safe wrappers;
+- The `/optimize-vault` skill for optimizing organized notes;
+- Deterministic helper scripts for `organize-inbox` and `optimize-vault`;
+- The `organize.sh` offline organizing script;
+- Project-internal Codex CLI skills;
+- A Copilot CLI plugin manifest and skills inside the hidden `.copilot/` directory.
+
+This repository does not include:
+
+- Your personal notes;
+- Installations of local tools such as `markitdown`, `Pillow`, `whisper`, `copilot`, or `codex`;
+- Local settings, logs, login state, and scheduled tasks of Claude Code, Copilot CLI, or Codex CLI;
+- Local state such as Obsidian workspace.
