@@ -83,7 +83,7 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
         if line.strip() == "---":
             start = idx
             break
-        if line.strip() and not line.startswith("> 整理自 Inbox"):
+        if line.strip() and not line.startswith("> Organized from Inbox"):
             break
     if start is None:
         return {}, text
@@ -134,7 +134,7 @@ def extract_urls(frontmatter: dict[str, str], text: str) -> list[str]:
         if value.startswith("http://") or value.startswith("https://"):
             urls.append(normalize_url(value))
     for line in text.splitlines():
-        if any(marker in line for marker in ("来源 URL", "来源：", "来源:", "Source:", "source:")):
+        if any(marker in line for marker in ("Source URL", "Source:", "source:")):
             urls.extend(normalize_url(match) for match in URL_RE.findall(line))
     return list(dict.fromkeys(urls))
 
@@ -144,15 +144,15 @@ def normalize_body_for_hash(text: str) -> str:
     out: list[str] = []
     for line in body.splitlines():
         stripped = line.strip()
-        if stripped.startswith("> 整理自 Inbox"):
+        if stripped.startswith("> Organized from Inbox"):
             continue
-        if "内容指纹" in stripped or stripped.startswith("content_fingerprint:"):
+        if "content fingerprint" in stripped or stripped.startswith("content_fingerprint:"):
             continue
         if stripped.startswith("source_url:") or stripped.startswith("canonical_url:"):
             continue
         if re.match(r"^source:\s*https?://", stripped):
             continue
-        if re.match(r"^>\s*(来源 URL|来源|重复内容|重复依据|canonical)：?", stripped):
+        if re.match(r"^>\s*(Source URL|Source|Duplicate content|Duplication evidence|canonical):?", stripped):
             continue
         out.append(line)
     body = "\n".join(out)
@@ -345,10 +345,10 @@ def make_report(vault: Path, convert: bool) -> dict:
 
 
 def duplicate_marker(text: str, canonical_title: str, evidence: list[dict], date: str) -> str:
-    if "重复内容，canonical" in text:
+    if "Duplicate content, canonical" in text:
         return text
     ev = ", ".join(f"{item['type']}={item['value']}" for item in evidence)
-    return f"> 重复内容，canonical：[[{canonical_title}]]\n> 重复依据：{ev}\n> 整理自 Inbox，{date}\n\n" + text
+    return f"> Duplicate content, canonical: [[{canonical_title}]]\n> Duplication evidence: {ev}\n> Organized from Inbox, {date}\n\n" + text
 
 
 def apply_duplicates(vault: Path, report: dict, date: str) -> None:
@@ -380,12 +380,12 @@ def append_log(vault: Path, report: dict, date: str, mode: str) -> None:
     left = [c for c in report["candidates"] if c["status"] != "ready"]
     entry = [
         f"## {date} manual",
-        f"- 脚本模式：{mode}",
-        f"- Inbox 候选：{report['inbox_count']}",
-        f"- 完全重复：{len(report['duplicates'])}",
-        f"- 已归档重复：{len(report['applied']['duplicates'])}",
-        f"- 留在 Inbox：{len(left)}",
-        "commit: 无",
+        f"- Script mode: {mode}",
+        f"- Inbox candidates: {report['inbox_count']}",
+        f"- Exact duplicates: {len(report['duplicates'])}",
+        f"- Archived duplicates: {len(report['applied']['duplicates'])}",
+        f"- Left in Inbox: {len(left)}",
+        "commit: none",
         "",
     ]
     old = path.read_text(encoding="utf-8") if path.exists() else ""
@@ -397,27 +397,27 @@ def markdown_report(report: dict) -> str:
     left = [c for c in report["candidates"] if c["status"] != "ready"]
     invalid = report.get("invalid_fingerprints", [])
     lines = [
-        "## 范围与扫描结果",
-        f"- Inbox 候选：{report['inbox_count']}",
-        f"- 可整理 Markdown：{len(ready)}",
-        f"- 已整理库笔记：{report['existing_note_count']}",
+        "## Scope and scan results",
+        f"- Inbox candidates: {report['inbox_count']}",
+        f"- Organizable Markdown: {len(ready)}",
+        f"- Existing library notes: {report['existing_note_count']}",
         "",
-        "## 确定性结果",
-        f"- protected paths：{', '.join(report['protected_paths']) if report['protected_paths'] else '无'}",
-        f"- 完全重复：{len(report['duplicates']) if report['duplicates'] else '无'}",
-        f"- 指纹不一致：{len(invalid) if invalid else '无'}",
-        f"- 已归档重复：{len(report['applied']['duplicates']) if report['applied']['duplicates'] else '无'}",
+        "## Deterministic results",
+        f"- protected paths: {', '.join(report['protected_paths']) if report['protected_paths'] else 'none'}",
+        f"- Exact duplicates: {len(report['duplicates']) if report['duplicates'] else 'none'}",
+        f"- Fingerprint mismatches: {len(invalid) if invalid else 'none'}",
+        f"- Archived duplicates: {len(report['applied']['duplicates']) if report['applied']['duplicates'] else 'none'}",
         "",
-        "## 需要模型继续处理",
-        "- PARA 分类、提炼、承接、语义补链：由模型基于 ready 候选继续处理。",
-        "- 主题相似但非完全重复：由模型判断并只做低风险补链或报告。",
+        "## Needs model follow-up",
+        "- PARA classification, distillation, supporting-note creation, and semantic link addition: handled by the model over the ready candidates.",
+        "- Topically similar but not exact duplicates: the model judges and only performs low-risk link additions or reports.",
         "",
-        "## 留在 Inbox / 跳过",
+        "## Left in Inbox / skipped",
     ]
     if left:
         lines.extend(f"- `{c['path']}`：{c.get('reason') or c['status']}" for c in left)
     else:
-        lines.append("- 无")
+        lines.append("- none")
     return "\n".join(lines) + "\n"
 
 
@@ -450,7 +450,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--mode", choices=("scan", "prepare", "apply-duplicates"), default="scan")
     parser.add_argument("--json", dest="json_path")
     parser.add_argument("--markdown", dest="markdown_path")
-    parser.add_argument("--date", default="未注明日期")
+    parser.add_argument("--date", default="undated")
     parser.add_argument("--no-log", action="store_true")
     args = parser.parse_args(argv)
 

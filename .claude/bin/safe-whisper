@@ -141,7 +141,7 @@ def main(argv: list[str]) -> int:
                 return fail("whisper output is blank")
 
             temp_path.write_text(
-                f"# {candidate.stem}\n\n原始文件：[[{candidate.name}]]\n\n## 转录\n\n{text}\n",
+                f"# {candidate.stem}\n\nOriginal file: [[{candidate.name}]]\n\n## Transcript\n\n{text}\n",
                 encoding="utf-8",
             )
             if os.path.lexists(output):

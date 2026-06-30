@@ -1,23 +1,23 @@
 ---
 name: setup-brain
-description: 初始化 brain-vault：采访用户身份和目标，生成 CLAUDE.md，检查 PARA 目录、git 状态、本机转换工具（markitdown、Pillow、whisper、ffmpeg）和 AI CLI（copilot、codex），并按用户确认安装缺失工具。
+description: Initialize brain-vault — interview the user for identity and goals, generate CLAUDE.md, check PARA directories, git status, local conversion tools (markitdown, Pillow, whisper, ffmpeg) and AI CLIs (copilot, codex), and install missing tools on user confirmation.
 ---
 
 # Setup Brain
 
-你是 brain-vault 初始化向导。目标是在当前 vault 根目录完成一次安全、可重复的初始化。不要读取或外传凭证。不要删除用户文件。执行安装命令、覆盖已有配置、提交 git 或设置定时任务前必须先确认。
+You are the brain-vault initialization wizard. The goal is a safe, repeatable initialization in the current vault root. Do not read or exfiltrate credentials. Do not delete user files. Confirm before running install commands, overwriting existing config, committing to git, or setting up scheduled tasks.
 
-## 适用前提
+## Preconditions
 
-- 工作目录应是 brain-vault 根目录。
-- 如果当前目录不是 git 仓库，先说明并询问是否初始化 git。
-- 如果 `CLAUDE.md` 已包含用户真实内容，不要静默覆盖；先读取并说明将更新哪些段落。
+- The working directory should be the brain-vault root.
+- If the current directory is not a git repo, explain first and ask whether to init git.
+- If `CLAUDE.md` already contains real user content, do not silently overwrite; read it first and state which sections will be updated.
 
-## 初始化流程
+## Initialization flow
 
-### 1. 预检
+### 1. Precheck
 
-运行并记录：
+Run and record:
 
 ```bash
 pwd
@@ -35,37 +35,37 @@ command -v npm || true
 command -v python3 || true
 ```
 
-若存在未提交改动，不要自动覆盖相关文件；把它们列为 protected paths。
+If there are uncommitted changes, do not auto-overwrite the related files; list them as protected paths.
 
-### 2. 采访用户
+### 2. Interview the user
 
-一次性询问必要信息，避免反复打断：
+Ask for the necessary information in one pass to avoid repeated interruptions:
 
-1. 你是谁？角色、主要职责、专业方向是什么？
-2. 今年或近期最重要的目标是什么？
-3. 当前活跃项目有哪些？每个项目一句话说明。
-4. 你希望 Claude 如何协作？例如是否偏好简洁结论、详细推理、自动执行、谨慎确认等。
-5. 计划整理哪些文件格式？是否启用文档/数据/网页/Notebook 转换能力（Word/PDF/PPT/Excel/TXT/CSV/JSON/HTML/EPUB/IPYNB → Markdown）和截图占位能力（图片 → Markdown 占位）？
-6. 是否启用音视频转录能力（音视频 → Markdown）？如果启用，是否接受首次真实转录时下载 Whisper 模型，是否需要指定模型或语言？
-7. 是否需要 Copilot CLI 或 Codex CLI 支持？
-8. 是否需要离线自动整理？如果需要，偏好手动运行 `organize.sh`、系统 crontab/launchd，还是 Claude Code 会话内定时？
+1. Who are you? Role, main responsibilities, professional focus?
+2. What are the most important goals this year or near-term?
+3. What are the active projects? One sentence each.
+4. How do you want Claude to collaborate? E.g. preference for concise conclusions, detailed reasoning, autonomous execution, cautious confirmation, etc.
+5. Which file formats do you plan to organize? Enable document/data/web/Notebook conversion (Word/PDF/PPT/Excel/TXT/CSV/JSON/HTML/EPUB/IPYNB → Markdown) and screenshot-placeholder capability (image → Markdown placeholder)?
+6. Enable audio/video transcription (audio/video → Markdown)? If yes, accept downloading the Whisper model on first real transcription, and do you need to specify a model or language?
+7. Need Copilot CLI or Codex CLI support?
+8. Need offline auto-organize? If yes, prefer manually running `organize.sh`, system crontab/launchd, or in-session Claude Code scheduling?
 
-如用户只要求快速初始化，可使用保守默认：保留现有协作偏好，创建空 PARA 目录，只检测工具不安装。
+If the user only wants a quick init, conservative defaults are fine: keep existing collaboration preferences, create empty PARA directories, detect tools only without installing.
 
-### 3. 生成或更新 CLAUDE.md
+### 3. Generate or update CLAUDE.md
 
-根据用户回答更新：
+Update from the user's answers:
 
-- `## 我是谁`
-- `## 今年的目标`
-- `## 协作偏好`
-- `## 当前项目`
+- `## Who I am`
+- `## This year's goals`
+- `## Collaboration preferences`
+- `## Current projects`
 
-保留下方 Vault 约定、常用命令、工具层级和项目级坑点。不要写入临时任务状态、一次性信息或凭证。
+Keep the Vault conventions, common commands, tool tiers, and project-level pitfalls below. Do not write temporary task state, one-off info, or credentials.
 
-### 4. 确保目录结构
+### 4. Ensure directory structure
 
-确保以下目录存在：
+Ensure these directories exist:
 
 ```text
 Inbox/
@@ -86,70 +86,70 @@ Archive/
 .copilot/skills/optimize-vault/
 ```
 
-空目录用 `.gitkeep` 保留。
+Keep empty directories with `.gitkeep`.
 
-### 5. 工具检测与安装引导
+### 5. Tool detection and install guidance
 
-#### 基础检测
+#### Basic detection
 
-- `markitdown`：用于 `.doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf/.txt/.text/.markdown/.csv/.json/.jsonl/.html/.htm/.epub/.ipynb` 转 Markdown。
-- `Pillow`：用于 `.png/.jpg/.jpeg/.webp` 生成截图占位 Markdown。
-- `whisper`：用于 `.mp3/.m4a/.wav/.mp4/.mov/.aac/.aiff/.flac/.ogg/.opus/.webm` 转 Markdown。
-- `ffmpeg`：Whisper 解码音视频所需的本机依赖。
-- Whisper 模型：首次真实转录可能下载默认模型；用 `whisper --help` 验证当前默认模型和 `--model` 参数，必要时通过 `WHISPER_MODEL` 指定。
-- `copilot` / `gh copilot`：用于 GitHub Copilot CLI。
-- `codex`：用于 OpenAI Codex CLI。
-- `uv`、`brew`、`npm`、`python3`：用于推荐安装路径判断。
+- `markitdown`: for `.doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf/.txt/.text/.markdown/.csv/.json/.jsonl/.html/.htm/.epub/.ipynb` → Markdown.
+- `Pillow`: for `.png/.jpg/.jpeg/.webp` → screenshot-placeholder Markdown.
+- `whisper`: for `.mp3/.m4a/.wav/.mp4/.mov/.aac/.aiff/.flac/.ogg/.opus/.webm` → Markdown.
+- `ffmpeg`: local dependency Whisper needs to decode audio/video.
+- Whisper model: the first real transcription may download the default model; verify the current default model and `--model` parameter with `whisper --help`, and specify via `WHISPER_MODEL` if needed.
+- `copilot` / `gh copilot`: for GitHub Copilot CLI.
+- `codex`: for OpenAI Codex CLI.
+- `uv`, `brew`, `npm`, `python3`: for recommending install paths.
 
-#### 安装原则
+#### Install principles
 
-- clone 仓库不会自动安装任何工具。
-- 只检测时无需确认；执行安装命令前必须确认。
-- 优先给出命令，让用户自己决定是否运行。
-- 不要猜测包名或参数；安装前用已存在工具的 `--help` 或官方/本机说明验证命令。无法验证时说明不确定并让用户手动安装。
+- Cloning the repo does not auto-install any tool.
+- Detection only needs no confirmation; confirm before running install commands.
+- Prefer giving commands and letting the user decide whether to run them.
+- Do not guess package names or parameters; before installing, verify the command with the existing tool's `--help` or official/local docs. When unverifiable, state the uncertainty and let the user install manually.
 
-#### 推荐安装路径
+#### Recommended install paths
 
-如果用户启用文档转换且缺少 `markitdown`：
+If the user enables document conversion and lacks `markitdown`:
 
-1. 若有 `uv`，先运行 `uv tool install --help` 验证命令存在，再建议：
+1. If `uv` is present, first run `uv tool install --help` to verify the command exists, then suggest:
 
    ```bash
    uv tool install markitdown
    ```
 
-2. 若无 `uv` 但有 `python3`，建议用户选择自己的 Python 包管理方式安装 MarkItDown；不要替用户猜测全局 pip 安装策略。
-3. 安装后验证：
+2. If no `uv` but `python3` is present, suggest the user pick their own Python package manager to install MarkItDown; do not guess a global pip strategy for them.
+3. Verify after install:
 
    ```bash
    command -v markitdown
    markitdown --help
    ```
 
-如果用户启用音频转录：
+If the user enables audio transcription:
 
-1. 检测 `whisper` 和 `ffmpeg`：
+1. Detect `whisper` and `ffmpeg`:
 
    ```bash
    command -v whisper || true
    command -v ffmpeg || true
    ```
 
-2. 若缺少 `whisper` 且有 `brew`，先运行 `brew info openai-whisper` 验证 formula 存在；若输出显示依赖 `ffmpeg`，说明 Homebrew 安装会一并处理该依赖，再建议：
+2. If `whisper` is missing and `brew` is present, first run `brew info openai-whisper` to verify the formula exists; if the output shows it depends on `ffmpeg`, Homebrew will handle that dependency, then suggest:
 
    ```bash
    brew install openai-whisper
    ```
 
-3. 若缺少 `ffmpeg` 且不会通过 `brew install openai-whisper` 一并安装，先运行 `brew info ffmpeg` 验证 formula 存在，再建议：
+3. If `ffmpeg` is missing and will not be installed via `brew install openai-whisper`, first run `brew info ffmpeg` to verify the formula exists, then suggest:
 
    ```bash
    brew install ffmpeg
    ```
 
-4. 若无 `brew` 但有 `uv`，先运行 `uv pip install --help` 验证命令存在；Python 安装 Whisper 通常需要目标环境，且 `ffmpeg` 仍可能需要单独安装，先让用户选择环境，不要静默全局安装。
-5. 若用户已有 Python 或系统包管理方案，允许用户提供安装命令。
-6. 安装后验证：
+4. If no `brew` but `uv` is present, first run `uv pip install --help` to verify the command exists; installing Whisper via Python usually needs a target environment, and `ffmpeg` may still need separate install — let the user choose the environment first; do not silently install globally.
+5. If the user already has a Python or system package manager, allow them to provide the install command.
+6. Verify after install:
 
    ```bash
    command -v whisper
@@ -158,36 +158,36 @@ Archive/
    ffmpeg -version
    ```
 
-`whisper --help` 会显示当前默认模型和 `--model` 参数；若默认模型不是用户想要的模型，可建议用 `WHISPER_MODEL=<模型名>` 运行整理。Whisper 模型可能较大，首次真实转录可能下载模型；不要在 setup 阶段静默触发模型下载，执行真实转录前提醒用户。
+`whisper --help` shows the current default model and `--model` parameter; if the default is not what the user wants, suggest running organize with `WHISPER_MODEL=<model name>`. Whisper models can be large and the first real transcription may download one; do not silently trigger a model download at setup time — remind the user before real transcription.
 
-如果用户启用 Copilot CLI 支持：
+If the user enables Copilot CLI support:
 
-1. 若已有 `copilot`，运行 `copilot --help` 验证可用。
-2. 若无 `copilot` 但有 `gh`，运行 `gh copilot --help` 验证 GitHub CLI 支持；可建议用户用 `gh copilot` 启动或下载 Copilot CLI。
-3. 登录、下载、更新或修改 Copilot 配置前必须确认。
-4. 说明 `.github/copilot-instructions.md` 是本仓库的 Copilot 指令文件，`.copilot/.github/plugin/plugin.json` 和 `.copilot/skills/*/SKILL.md` 是项目内 Copilot CLI plugin skills；运行 `copilot init` 前应检查是否会覆盖已有定制内容。
+1. If `copilot` is present, run `copilot --help` to verify it works.
+2. If no `copilot` but `gh` is present, run `gh copilot --help` to verify GitHub CLI support; you may suggest the user start with `gh copilot` or download Copilot CLI.
+3. Confirm before login, download, update, or modifying Copilot config.
+4. Note that `.github/copilot-instructions.md` is this repo's Copilot instructions file, and `.copilot/.github/plugin/plugin.json` and `.copilot/skills/*/SKILL.md` are in-project Copilot CLI plugin skills; before running `copilot init`, check whether it would overwrite existing customization.
 
-如果用户启用 Codex CLI 支持：
+If the user enables Codex CLI support:
 
-1. 若已有 `codex`，运行 `codex --help` 验证可用；如果命令存在但报二进制缺失或启动失败，提示用户重装或修复。
-2. 若无 `codex` 但有 `npm`，可建议：
+1. If `codex` is present, run `codex --help` to verify it works; if the command exists but reports a missing binary or startup failure, suggest reinstalling or repairing.
+2. If no `codex` but `npm` is present, suggest:
 
    ```bash
    npm install -g @openai/codex
    ```
 
-3. 若有 `brew`，可建议：
+3. If `brew` is present, suggest:
 
    ```bash
    brew install --cask codex
    ```
 
-4. 安装、登录或配置 API key 前必须确认。
-5. 说明 `AGENTS.md` 是通用 agent 指令文件，`.codex/skills/*/SKILL.md` 是项目内 Codex skills，供 Codex CLI 和其他 agent 参考。
+4. Confirm before installing, logging in, or configuring an API key.
+5. Note that `AGENTS.md` is the general agent instructions file, and `.codex/skills/*/SKILL.md` are in-project Codex skills, for Codex CLI and other agents to reference.
 
-### 6. Wrapper 检查
+### 6. Wrapper check
 
-确认以下文件存在且可执行：
+Confirm these files exist and are executable:
 
 ```bash
 test -x .claude/bin/safe-markitdown
@@ -201,13 +201,13 @@ test -x .claude/bin/organize-inbox-prepare
 test -x .claude/bin/organize-inbox-apply-duplicates
 ```
 
-如不可执行，执行：
+If not executable, run:
 
 ```bash
 chmod +x .claude/bin/safe-markitdown .claude/bin/safe-whisper .claude/bin/safe-mkdir .claude/bin/safe-git-add .claude/bin/safe-git-mv .claude/bin/safe-git-commit .claude/bin/organize-inbox-scan .claude/bin/organize-inbox-prepare .claude/bin/organize-inbox-apply-duplicates .claude/organize.sh
 ```
 
-运行语法检查：
+Run syntax checks:
 
 ```bash
 python3 -m py_compile .claude/bin/safe-markitdown .claude/bin/safe-whisper .claude/bin/safe-mkdir .claude/bin/safe-git-add .claude/bin/safe-git-mv .claude/bin/safe-git-commit .claude/bin/organize-inbox-scan .claude/bin/organize-inbox-prepare .claude/bin/organize-inbox-apply-duplicates
@@ -215,27 +215,27 @@ zsh -n .claude/organize.sh
 python3 -m json.tool .copilot/.github/plugin/plugin.json >/tmp/brain-vault-plugin-json-check.out
 ```
 
-### 7. 可选自动整理
+### 7. Optional auto-organize
 
-如果用户需要自动整理，说明三种方式：
+If the user wants auto-organize, explain three options:
 
-- 会话内：用 Claude Code 定时任务触发 `/organize-inbox`，但会话关闭或任务过期会影响运行。
-- 系统级：用 crontab/launchd 调 `VAULT=/path/to/brain .claude/organize.sh`。
-- 手动：定期运行 `/organize-inbox` 或 `.claude/organize.sh`。
+- In-session: trigger `/organize-inbox` via Claude Code scheduling, but session close or task expiry affects runs.
+- System-level: call `VAULT=/path/to/brain .claude/organize.sh` via crontab/launchd.
+- Manual: periodically run `/organize-inbox` or `.claude/organize.sh`.
 
-修改系统 crontab/launchd 前必须确认。
+Confirm before modifying system crontab/launchd.
 
-### 8. 最终验证和输出
+### 8. Final verification and output
 
-运行：
+Run:
 
 ```bash
 git status --short
 ```
 
-输出保持简洁：
+Keep the output concise:
 
-- 已初始化的身份层段落。
-- 工具状态：`markitdown` 已安装/未安装，`whisper` 已安装/未安装，`ffmpeg` 已安装/未安装，Whisper 默认模型/模型下载提醒，`copilot` 已安装/未安装，`codex` 已安装/未安装。
-- 已启用能力：Markdown 整理、文档/数据/网页/Notebook 转换、截图占位、音视频转录、已整理笔记优化、Copilot CLI 指令与 plugin skills、Codex/通用 agent 指令与项目内 skills。
-- 下一步：把资料放入 `Inbox/`，运行 `/organize-inbox`；需要体检已整理笔记时运行 `/optimize-vault`。
+- Initialized identity-layer sections.
+- Tool status: `markitdown` installed/not installed, `whisper` installed/not installed, `ffmpeg` installed/not installed, Whisper default model / model-download reminder, `copilot` installed/not installed, `codex` installed/not installed.
+- Enabled capabilities: Markdown organize, document/data/web/Notebook conversion, screenshot placeholder, audio/video transcription, organized-note optimization, Copilot CLI instructions and plugin skills, Codex/general-agent instructions and in-project skills.
+- Next steps: put material into `Inbox/` and run `/organize-inbox`; run `/optimize-vault` when you want a health check on organized notes.

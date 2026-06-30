@@ -1,16 +1,16 @@
 ---
 name: setup-brain
-description: 初始化 brain-vault：采访用户身份和目标，生成 CLAUDE.md，检查 PARA 目录、git 状态、本机转换工具（markitdown、Pillow、whisper、ffmpeg）和 AI CLI（copilot、codex），并按用户确认安装缺失工具。
+description: Initialize brain-vault — interview the user for identity and goals, generate CLAUDE.md, check PARA directories, git status, local conversion tools (markitdown, Pillow, whisper, ffmpeg) and AI CLIs (copilot, codex), and install missing tools on user confirmation.
 ---
 
 # Setup Brain for Codex
 
-这是 brain-vault 的 Codex CLI 入口。工作目录必须是 vault 根目录。
+This is the brain-vault Codex CLI entry point. The working directory must be the vault root.
 
-## 执行规则
+## Execution rules
 
-1. 先读取 `.claude/skills/setup-brain/SKILL.md`；它是本仓库初始化流程的 canonical 规则源。
-2. 严格按该文件执行。若本文件与 `.claude/skills/setup-brain/SKILL.md` 冲突，以 `.claude/skills/setup-brain/SKILL.md` 为准。
-3. 若 `.claude/skills/setup-brain/SKILL.md` 不存在，停止并说明当前仓库缺少 brain-vault Claude Code skill，不能安全初始化。
-4. 不要删除用户文件；执行安装命令、覆盖已有配置、提交 git 或设置定时任务前必须先确认。
-5. 对 Copilot CLI / Codex CLI 支持，只在当前项目内更新说明或 skill 文件；不要修改用户全局 `~/.codex` / `~/.copilot` 配置，除非用户明确要求。
+1. First read `.claude/skills/setup-brain/SKILL.md`; it is the canonical rule source for this repo's initialization flow.
+2. Execute strictly per that file. If this file conflicts with `.claude/skills/setup-brain/SKILL.md`, `.claude/skills/setup-brain/SKILL.md` wins.
+3. If `.claude/skills/setup-brain/SKILL.md` does not exist, stop and state the repo is missing the brain-vault Claude Code skill and cannot safely initialize.
+4. Do not delete user files; confirm before running install commands, overwriting existing config, committing to git, or setting up scheduled tasks.
+5. For Copilot CLI / Codex CLI support, only update descriptions or skill files within the current project; do not modify the user's global `~/.codex` / `~/.copilot` config unless explicitly asked.

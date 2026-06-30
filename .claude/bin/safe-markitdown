@@ -65,13 +65,13 @@ def write_image_markdown(candidate: Path, temp_path: Path) -> int:
 
     temp_path.write_text(
         f"# {candidate.stem}\n\n"
-        f"> 截图笔记占位，原始文件：`Inbox/{candidate.name}`。\n\n"
-        "## 图片信息\n\n"
-        f"- 文件：`Inbox/{candidate.name}`\n"
-        f"- 格式：{image_format}\n"
-        f"- 尺寸：{width} × {height}\n\n"
-        "## 待整理\n\n"
-        "请结合原始截图内容提炼主题、关键信息和后续动作。\n",
+        f"> Screenshot note placeholder, original file: `Inbox/{candidate.name}`.\n\n"
+        "## Image info\n\n"
+        f"- File: `Inbox/{candidate.name}`\n"
+        f"- Format: {image_format}\n"
+        f"- Dimensions: {width} × {height}\n\n"
+        "## To organize\n\n"
+        "Distill topics, key information, and follow-up actions from the original screenshot.\n",
         encoding="utf-8",
     )
     return 0

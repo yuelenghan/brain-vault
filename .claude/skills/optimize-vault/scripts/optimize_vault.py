@@ -105,7 +105,7 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], list[str], str]:
         if line.strip() == "---":
             start = idx
             break
-        if line.strip() and not line.startswith("> 整理自 Inbox"):
+        if line.strip() and not line.startswith("> Organized from Inbox"):
             break
     if start is None:
         return {}, [], text
@@ -180,15 +180,15 @@ def normalize_body_for_hash(text: str) -> str:
     out: list[str] = []
     for line in body.splitlines():
         stripped = line.strip()
-        if stripped.startswith("> 整理自 Inbox"):
+        if stripped.startswith("> Organized from Inbox"):
             continue
-        if "内容指纹" in stripped or stripped.startswith("content_fingerprint:"):
+        if "content fingerprint" in stripped or stripped.startswith("content_fingerprint:"):
             continue
         if stripped.startswith("source_url:") or stripped.startswith("canonical_url:"):
             continue
         if re.match(r"^source:\s*https?://", stripped):
             continue
-        if re.match(r"^>\s*(来源 URL|来源|重复内容|重复依据|canonical)：?", stripped):
+        if re.match(r"^>\s*(Source URL|Source|Duplicate content|Duplication evidence|canonical):?", stripped):
             continue
         out.append(line)
     body = "\n".join(out)
@@ -211,7 +211,7 @@ def extract_urls(frontmatter: dict[str, str], text: str) -> list[str]:
         if value.startswith("http://") or value.startswith("https://"):
             urls.append(normalize_url(value))
     for line in text.splitlines():
-        if any(marker in line for marker in ("来源 URL", "来源：", "来源:", "Source:", "source:")):
+        if any(marker in line for marker in ("Source URL", "Source:", "source:")):
             for match in URL_RE.findall(line):
                 urls.append(normalize_url(match))
     return list(dict.fromkeys(urls))
@@ -251,7 +251,7 @@ def read_note(vault: Path, path: Path, protected: set[str]) -> Note:
         stored_fingerprint=stored_fingerprint,
         fingerprint_valid=not stored_fingerprint or stored_fingerprint == computed_fingerprint,
         content_length=len(normalize_body_for_hash(text)),
-        has_summary="## 提炼" in text or "## 摘要" in text,
+        has_summary="## Summary" in text or "## Abstract" in text,
         outbound_count=len(links),
         protected=is_protected(rel, protected),
     )
@@ -394,7 +394,7 @@ def insert_frontmatter_fields(text: str, fields: dict[str, str]) -> str:
         if line.strip() == "---":
             start = idx
             break
-        if line.strip() and not line.startswith("> 整理自 Inbox"):
+        if line.strip() and not line.startswith("> Organized from Inbox"):
             break
     if start is None:
         block = ["---\n", *[f"{key}: {quote_yaml(value)}\n" for key, value in fields.items()], "---\n", "\n"]
@@ -417,17 +417,17 @@ def insert_frontmatter_fields(text: str, fields: dict[str, str]) -> str:
 
 
 def add_duplicate_marker(text: str, canonical_title: str, evidence: list[dict], date: str) -> str:
-    if "重复内容，canonical" in text:
+    if "Duplicate content, canonical" in text:
         return text
     evidence_text = ", ".join(f"{item['type']}={item['value']}" for item in evidence)
-    marker = f"> 重复内容，canonical：[[{canonical_title}]]\n> 重复依据：{evidence_text}\n> 优化日期：{date}\n\n"
+    marker = f"> Duplicate content, canonical: [[{canonical_title}]]\n> Duplication evidence: {evidence_text}\n> Optimization date: {date}\n\n"
     return marker + text
 
 
 def append_canonical_record(text: str, duplicate_title: str) -> str:
-    if duplicate_title in text and "重复" in text:
+    if duplicate_title in text and "Duplicate archive" in text:
         return text
-    return text.rstrip() + f"\n\n## 重复归档\n\n- [[{duplicate_title}]]：已归档为重复内容。\n"
+    return text.rstrip() + f"\n\n## Duplicate archive\n\n- [[{duplicate_title}]]: archived as duplicate content.\n"
 
 
 def replace_wikilink(text: str, old: str, new: str) -> str:
@@ -526,14 +526,14 @@ def append_log(vault: Path, report: dict, date: str) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     entry = (
         f"## {date} manual\n"
-        f"- 范围：{', '.join(report['scope'])}\n"
-        f"- 完全重复：{len(report['duplicates'])}\n"
-        f"- 疑似重复：0\n"
-        f"- 补链：0\n"
-        f"- 修复失效链接：{len(report['applied']['broken_links'])}\n"
-        f"- 元数据补全：{len(report['applied']['metadata'])}\n"
-        f"- 结构建议：{len(report['orphan_notes'])}\n"
-        "commit: 无\n"
+        f"- Scope: {', '.join(report['scope'])}\n"
+        f"- Exact duplicates: {len(report['duplicates'])}\n"
+        f"- Suspected duplicates: 0\n"
+        f"- Link additions: 0\n"
+        f"- Broken links fixed: {len(report['applied']['broken_links'])}\n"
+        f"- Metadata backfilled: {len(report['applied']['metadata'])}\n"
+        f"- Structure suggestions: {len(report['orphan_notes'])}\n"
+        "commit: none\n"
     )
     old = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
     log_path.write_text(old + ("\n" if old and not old.endswith("\n") else "") + entry, encoding="utf-8")
@@ -566,17 +566,17 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
 
 def summarize_items(items: list, formatter, limit: int = 8) -> str:
     if not items:
-        return "无"
+        return "none"
     rendered = [formatter(item) for item in items[:limit]]
     extra = len(items) - limit
-    suffix = f"；另有 {extra} 项" if extra > 0 else ""
-    return "；".join(rendered) + suffix
+    suffix = f"; {extra} more" if extra > 0 else ""
+    return "; ".join(rendered) + suffix
 
 
 def markdown_report(report: dict) -> str:
     coverage_data = report["coverage"]
     duplicate_lines = [
-        f"- canonical `{item['canonical']}`；duplicates: {', '.join('`' + p + '`' for p in item['duplicates'])}"
+        f"- canonical `{item['canonical']}`; duplicates: {', '.join('`' + p + '`' for p in item['duplicates'])}"
         for item in report["duplicates"]
     ]
     suspected = report["report_only"].get("suspected_duplicates", [])
@@ -586,7 +586,7 @@ def markdown_report(report: dict) -> str:
     evidence_items = [item for item in skipped if item.get("type") not in {"ambiguous_broken_link"} and not item.get("type", "").startswith("protected_")]
     uncertain_summary = summarize_items(
         uncertain_items,
-        lambda item: f"`{item.get('source')}` 中 `[[{item.get('link')}]]` 无唯一匹配",
+        lambda item: f"`[[{item.get('link')}]]` in `{item.get('source')}` has no unique match",
     )
     evidence_summary = summarize_items(
         [*protected_items, *evidence_items],
@@ -594,30 +594,30 @@ def markdown_report(report: dict) -> str:
     )
     invalid_count = len(report.get("invalid_fingerprints", []))
     lines = [
-        "## 范围与扫描结果",
-        f"- 范围：{', '.join(report['scope'])}",
-        f"- 扫描：{coverage_data['markdown_count']} 篇 Markdown；目录分布 {coverage_data['distribution']}；来源 URL 覆盖 {coverage_data['source_url_or_canonical']}；指纹覆盖 {coverage_data['content_fingerprint']}；指纹不一致 {invalid_count}",
+        "## Scope and scan results",
+        f"- Scope: {', '.join(report['scope'])}",
+        f"- Scan: {coverage_data['markdown_count']} Markdown notes; directory distribution {coverage_data['distribution']}; source URL coverage {coverage_data['source_url_or_canonical']}; fingerprint coverage {coverage_data['content_fingerprint']}; fingerprint mismatches {invalid_count}",
         "",
-        "## 已自动处理",
-        f"- 重复归档：{len(report['applied']['duplicates']) or '无'}",
-        f"- 补链：无（语义补链仅由模型基于脚本报告建议处理）",
-        f"- 元数据补全：{len(report['applied']['metadata']) or '无'}",
-        f"- 失效链接修复：{len(report['applied']['broken_links']) or '无'}",
+        "## Auto-processed",
+        f"- Duplicate archival: {len(report['applied']['duplicates']) or 'none'}",
+        f"- Link additions: none (semantic link additions are only suggested by the model based on the script report)",
+        f"- Metadata backfill: {len(report['applied']['metadata']) or 'none'}",
+        f"- Broken links fixed: {len(report['applied']['broken_links']) or 'none'}",
         "",
-        "## 只报告，未自动处理",
-        "- 完全重复候选：" + ("；".join(duplicate_lines) if duplicate_lines else "无"),
-        f"- 疑似重复：{len(suspected) if suspected else '无'}",
-        f"- 孤岛笔记：{len(report['orphan_notes']) if report['orphan_notes'] else '无'}",
+        "## Report only, not auto-processed",
+        "- Exact duplicate candidates: " + ("; ".join(duplicate_lines) if duplicate_lines else "none"),
+        f"- Suspected duplicates: {len(suspected) if suspected else 'none'}",
+        f"- Orphan notes: {len(report['orphan_notes']) if report['orphan_notes'] else 'none'}",
         "",
-        "## 跳过 / 不确定",
-        "- protected paths：" + (", ".join(f"`{p}`" for p in report["protected_paths"]) if report["protected_paths"] else "无"),
-        "- 不确定匹配：" + uncertain_summary,
-        "- 证据不足：" + evidence_summary,
+        "## Skipped / uncertain",
+        "- protected paths: " + (", ".join(f"`{p}`" for p in report["protected_paths"]) if report["protected_paths"] else "none"),
+        "- Uncertain matches: " + uncertain_summary,
+        "- Insufficient evidence: " + evidence_summary,
         "",
-        "## 验证结果",
-        f"- git status：{report['verification'].get('git_status', '未检查')}",
-        f"- 自检：{report['verification'].get('self_check', '未检查')}",
-        "- commit：无",
+        "## Verification results",
+        f"- git status: {report['verification'].get('git_status', 'not checked')}",
+        f"- self-check: {report['verification'].get('self_check', 'not checked')}",
+        "- commit: none",
         "",
     ]
     return "\n".join(lines)
@@ -632,7 +632,7 @@ def safe_self_check(vault: Path, report: dict) -> None:
         if not (vault / item["duplicate"]).exists():
             duplicate_missing = True
             break
-    report["verification"]["self_check"] = "通过" if not bad_delete and not duplicate_missing else "未通过"
+    report["verification"]["self_check"] = "passed" if not bad_delete and not duplicate_missing else "failed"
 
 
 def checked_report_path(raw: str, expected: Path, label: str) -> Path:
@@ -697,7 +697,7 @@ def main(argv: list[str]) -> int:
     if args.mode == "apply-safe":
         protected = set(report["protected_paths"])
         notes, _by_name = build_index(vault, scopes, protected)
-        date = args.date or "未注明日期"
+        date = args.date or "undated"
         apply_metadata(notes, report)
         notes, _by_name = build_index(vault, scopes, protected)
         apply_duplicates(vault, notes, report, date)
@@ -707,8 +707,8 @@ def main(argv: list[str]) -> int:
             append_log(vault, report, date)
         safe_self_check(vault, report)
     else:
-        report["verification"]["git_status"] = "scan 模式未修改"
-        report["verification"]["self_check"] = "通过"
+        report["verification"]["git_status"] = "scan mode, no changes"
+        report["verification"]["self_check"] = "passed"
 
     try:
         write_outputs(report, json_path, markdown_path)
