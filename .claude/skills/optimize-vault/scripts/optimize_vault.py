@@ -37,6 +37,7 @@ class Note:
     fingerprint: str
     stored_fingerprint: str | None
     fingerprint_valid: bool
+    invalid_frontmatter: str | None
     content_length: int
     has_summary: bool
     inbound_count: int = 0
@@ -134,6 +135,45 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], list[str], str]:
             aliases.append(strip_quotes(line.split("-", 1)[1].strip()))
     body = "\n".join(lines[:start] + lines[end + 1 :])
     return frontmatter, aliases, body
+
+
+def find_invalid_frontmatter(text: str) -> str | None:
+    """Detect a structurally-present frontmatter whose unquoted scalar value
+    contains ': ' (colon+space), which YAML parses as a nested mapping and breaks
+    Obsidian properties / Dataview even though the `---` fences are on line 1.
+
+    Returns a description of the first offending line, or None. Only unquoted
+    scalars are flagged; quoted strings, flow collections ([...]/{...}), list
+    items, and empty values are skipped. `sha256:abc` (colon with no space) is
+    safe and not flagged.
+    """
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    end = None
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            end = idx
+            break
+    if end is None:
+        return None
+    for line in lines[1:end]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if line.lstrip().startswith("-"):
+            continue  # list item
+        m = re.match(r"^[A-Za-z0-9_.-]+:\s*(.*)$", line)
+        if not m:
+            continue
+        value = m.group(1).strip()
+        if not value:
+            continue
+        if value[0] in {'"', "'"} or value[0] in {'[', '{'}:
+            continue  # quoted scalar or flow collection
+        if ": " in value:
+            key = line.split(":", 1)[0].strip()
+            return f'unquoted value with ": " in `{key}`: {line.strip()}'
+    return None
 
 
 def strip_quotes(value: str) -> str:
@@ -250,6 +290,7 @@ def read_note(vault: Path, path: Path, protected: set[str]) -> Note:
         fingerprint=computed_fingerprint,
         stored_fingerprint=stored_fingerprint,
         fingerprint_valid=not stored_fingerprint or stored_fingerprint == computed_fingerprint,
+        invalid_frontmatter=find_invalid_frontmatter(text),
         content_length=len(normalize_body_for_hash(text)),
         has_summary="## Summary" in text or "## Abstract" in text,
         outbound_count=len(links),
@@ -372,6 +413,18 @@ def invalid_fingerprints(notes: list[Note]) -> list[dict]:
     ]
 
 
+def invalid_frontmatter_list(notes: list[Note]) -> list[dict]:
+    return [
+        {
+            "path": note.path,
+            "reason": "invalid_frontmatter_value",
+            "detail": note.invalid_frontmatter,
+        }
+        for note in notes
+        if note.invalid_frontmatter
+    ]
+
+
 def coverage(notes: list[Note]) -> dict:
     distribution = Counter(note.path.split("/", 1)[0] for note in notes)
     return {
@@ -380,6 +433,7 @@ def coverage(notes: list[Note]) -> dict:
         "source_url_or_canonical": sum(1 for note in notes if note.normalized_urls),
         "content_fingerprint": sum(1 for note in notes if note.frontmatter.get("content_fingerprint")),
         "invalid_fingerprint": sum(1 for note in notes if not note.fingerprint_valid),
+        "invalid_frontmatter": sum(1 for note in notes if note.invalid_frontmatter),
     }
 
 
@@ -532,6 +586,7 @@ def append_log(vault: Path, report: dict, date: str) -> None:
         f"- Link additions: 0\n"
         f"- Broken links fixed: {len(report['applied']['broken_links'])}\n"
         f"- Metadata backfilled: {len(report['applied']['metadata'])}\n"
+        f"- Invalid frontmatter values: {len(report.get('invalid_frontmatter', []))}\n"
         f"- Structure suggestions: {len(report['orphan_notes'])}\n"
         "commit: none\n"
     )
@@ -551,6 +606,7 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
         "metadata_missing": metadata_missing(notes),
         "orphan_notes": orphan_notes(notes),
         "invalid_fingerprints": invalid_fingerprints(notes),
+        "invalid_frontmatter": invalid_frontmatter_list(notes),
         "applied": {"duplicates": [], "metadata": [], "broken_links": []},
         "report_only": {"suspected_duplicates": [], "structure_suggestions": []},
         "skipped_uncertain": [],
@@ -561,6 +617,8 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
             report["skipped_uncertain"].append({"type": "ambiguous_broken_link", **item})
     for item in report["invalid_fingerprints"]:
         report["skipped_uncertain"].append({"type": "stale_or_invalid_fingerprint", **item})
+    for item in report["invalid_frontmatter"]:
+        report["skipped_uncertain"].append({"type": "invalid_frontmatter_value", **item})
     return report
 
 
@@ -593,10 +651,15 @@ def markdown_report(report: dict) -> str:
         lambda item: f"{item.get('type')}: `{item.get('path') or item.get('source') or item.get('link')}`",
     )
     invalid_count = len(report.get("invalid_fingerprints", []))
+    invalid_fm_count = len(report.get("invalid_frontmatter", []))
+    invalid_fm_lines = [
+        f"- `{item['path']}`: {item['detail']}"
+        for item in report.get("invalid_frontmatter", [])
+    ]
     lines = [
         "## Scope and scan results",
         f"- Scope: {', '.join(report['scope'])}",
-        f"- Scan: {coverage_data['markdown_count']} Markdown notes; directory distribution {coverage_data['distribution']}; source URL coverage {coverage_data['source_url_or_canonical']}; fingerprint coverage {coverage_data['content_fingerprint']}; fingerprint mismatches {invalid_count}",
+        f"- Scan: {coverage_data['markdown_count']} Markdown notes; directory distribution {coverage_data['distribution']}; source URL coverage {coverage_data['source_url_or_canonical']}; fingerprint coverage {coverage_data['content_fingerprint']}; fingerprint mismatches {invalid_count}; invalid frontmatter values {invalid_fm_count}",
         "",
         "## Auto-processed",
         f"- Duplicate archival: {len(report['applied']['duplicates']) or 'none'}",
@@ -608,6 +671,7 @@ def markdown_report(report: dict) -> str:
         "- Exact duplicate candidates: " + ("; ".join(duplicate_lines) if duplicate_lines else "none"),
         f"- Suspected duplicates: {len(suspected) if suspected else 'none'}",
         f"- Orphan notes: {len(report['orphan_notes']) if report['orphan_notes'] else 'none'}",
+        "- Invalid frontmatter values (Obsidian properties break; quote any value containing `: `): " + ("\n" + "\n".join(invalid_fm_lines) if invalid_fm_lines else "none"),
         "",
         "## Skipped / uncertain",
         "- protected paths: " + (", ".join(f"`{p}`" for p in report["protected_paths"]) if report["protected_paths"] else "none"),
