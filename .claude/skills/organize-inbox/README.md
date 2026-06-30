@@ -1,0 +1,26 @@
+# organize-inbox 维护者须知
+
+> 本文件给「改整理逻辑 / 脚本的人」看，不随 skill 运行、不随每会话自动加载。
+> 运行时硬约束在 `SKILL.md` 与 vault 根 `CLAUDE.md`，本文件只放设计 rationale 与维护流程。
+
+## 整理逻辑源与三路径
+
+整理逻辑的唯一来源是 `SKILL.md`。三条触发路径——会话内手动、CronCreate 定时、`organize.sh` 离线兜底——都调同一份 skill。修 skill 或 `organize.sh` 后，必须用临时 vault 跑 `VAULT=<临时目录> .claude/organize.sh` 验证，覆盖"实际移动 + 提交 + 日志"完整路径，不要只看 Inbox 是否为空。
+
+`.claude/` 默认不入库；当前版本化 `organize.sh`、`skills/`、`bin/`，其余（`organize.log`、`scheduled_tasks.json` 等）被 `.gitignore` 忽略，均为本地态。
+
+## CronCreate 定时整理的局限
+
+CronCreate 创建的定时整理是 durable，但 **7 天后自动过期**，且只在 Claude Code REPL idle 时 fire——不开 Claude Code 不会跑。真正离线兜底靠 `organize.sh`（headless，不依赖会话）。cron 过期后需重建，或改用系统 crontab 调 `organize.sh`。
+
+## headless 执行注意
+
+headless `claude -p` 整理不能设置过短硬超时；过短会出现已移动/编辑但未重新 `git add` 或未提交的半完成状态。脚本应接 `/dev/null` 避免等 stdin，并用较长兜底超时。
+
+## dirty baseline 对比
+
+`organize.sh` 做 dirty baseline 对比时，应排除 `Inbox/**` 和 `.claude/organize.log`：Inbox 是本次候选，organize.log 是必写日志。但 skill 里的 protected paths 只能按 `git status` 实际列出的具体路径解释，不能把父目录误判为整体受保护。
+
+## 转换 wrapper 与环境变量
+
+转换 wrapper 会清理环境变量，只保留 allowlist：`safe-markitdown` 处理文档/截图，`safe-whisper` 处理音视频（额外保留 `WHISPER_MODEL` / `WHISPER_LANGUAGE`）。测试时不要用自定义环境变量控制 mock 行为，改为替换临时 `PATH` 中的 mock 可执行文件。
