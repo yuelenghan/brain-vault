@@ -86,7 +86,7 @@ The script has generated a source URL and `content_fingerprint` for each `ready`
 - The script searches existing `source_url`, `canonical_url`, `content_fingerprint`, the original `source:` URL, and titles across `Projects/`, `Areas/`, `Resources/`, `Archive/`.
 - When the script matches an identical normalized URL or identical content fingerprint, it is an exact duplicate: keep the existing canonical note; the Inbox file must not enter normal PARA classification. Duplicate archival is performed by the script's `apply-duplicates`; the model must not hand-write duplicate-move logic.
 - When the same article exists in different formats, keep only one Markdown content note as canonical; the original file may be moved along as a source or archived as a duplicate, but must not be deleted.
-- Similar titles, related topics, or belonging to the same area do not make an exact duplicate; treat as topic cross-reference, keep independent material, add `可能相关：[[...]]`, and update the Area / Project ownership note.
+- Similar titles or related topics do not make an exact duplicate; treat as topic cross-reference, keep independent material, and update the Area / Project ownership note. Only add `可能相关：[[...]]` when there is a genuine content/topic relation — belonging to the same Area/Project is a classification relation, not a content relation, and must NOT by itself trigger a cross-link (the shared ownership note already connects them in the graph).
 - When you cannot confirm a duplicate, do not merge or archive as duplicate; continue normal classification and flag the suspected-related note during distillation or linking.
 
 ### 5. PARA classification
