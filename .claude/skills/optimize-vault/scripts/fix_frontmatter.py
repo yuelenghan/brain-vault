@@ -7,9 +7,15 @@ Handles three cases:
 - NO_FM: no frontmatter at all.
   → Synthesize a minimal frontmatter from the file name / `> 整理自 Inbox，<date>` / `> 内容指纹：sha256:...`.
 - OK_FM: the first line is already `---`; skip.
+- DOUBLE_FM: the first line is `---` but another frontmatter block exists deeper in the file
+  (e.g. garbled PDF content between two frontmatter blocks).
+  → Merge the real (later) frontmatter into line 1, removing the minimal first block + garbled content.
 
-Also: move the `> 内容指纹：sha256:...` blockquote into the YAML `content_fingerprint` field
-(only when the YAML does not already have that field).
+Also:
+- Move the `> 内容指纹：sha256:...` blockquote into the YAML `content_fingerprint` field
+  (only when the YAML does not already have that field).
+- Replace smart/curly quotes (""''') with straight quotes in frontmatter values,
+  since YAML does not recognize smart quotes as string delimiters.
 
 Structural fix only; field order and values inside the YAML are unchanged, keeping it auditable and reversible.
 """
@@ -21,6 +27,19 @@ from pathlib import Path
 FINGERPRINT_RE = re.compile(r"^>\s*内容指纹[：:]\s*(sha256:[0-9a-fA-F]+)\s*$")
 INBOX_DATE_RE = re.compile(r"^>\s*整理自 Inbox[，,]\s*(\d{4}-\d{2}-\d{2})\s*$")
 H1_RE = re.compile(r"^#\s+(.+?)\s*$")
+
+# Smart/curly quotes → straight quotes (YAML does not recognize smart quotes as string delimiters).
+SMART_QUOTE_MAP = str.maketrans({
+    "“": '"',   # " left double quotation mark
+    "”": '"',   # " right double quotation mark
+    "‘": "'",   # ' left single quotation mark
+    "’": "'",   # ' right single quotation mark
+})
+
+
+def fix_smart_quotes(text: str) -> str:
+    """Replace smart/curly quotes with straight ASCII quotes."""
+    return text.translate(SMART_QUOTE_MAP)
 
 
 def split_yaml(text: str):
@@ -98,17 +117,77 @@ def derive_title(path: Path, body: str) -> str:
     return path.stem
 
 
+def _find_fences(lines: list[str]) -> list[tuple[int, int]]:
+    """Return all (start, end) index pairs of `---`-delimited blocks in the file."""
+    pairs = []
+    i = 0
+    while i < len(lines):
+        if lines[i].strip() == "---":
+            for j in range(i + 1, len(lines)):
+                if lines[j].strip() == "---":
+                    pairs.append((i, j))
+                    i = j + 1
+                    break
+            else:
+                break
+        else:
+            i += 1
+    return pairs
+
+
+def _is_likely_frontmatter(yaml_text: str) -> bool:
+    """Heuristic: does this YAML block look like frontmatter (has key: value pairs)? """
+    return bool(re.search(r"^\w[\w-]*:\s+", yaml_text, re.MULTILINE))
+
+
 def process(path: Path) -> str | None:
     """Return a change description, or None when nothing changed."""
     raw = path.read_text(encoding="utf-8")
     lines = raw.split("\n")
+    changed_parts = []
 
-    # OK_FM: the first line is already ---.
+    # --- OK_FM: the first line is already ---. ---
     if lines and lines[0].strip() == "---":
-        # Still check for an unmigrated `> 内容指纹：` blockquote (OK_FM should not have one; skip).
-        return None
+        # Check for smart quotes in the frontmatter.
+        fences = _find_fences(lines)
+        if fences:
+            start, end = fences[0]
+            yaml_text = "\n".join(lines[start + 1 : end])
+            fixed_yaml = fix_smart_quotes(yaml_text)
+            quote_fixed = (fixed_yaml != yaml_text)
 
-    # Find the first --- (BROKEN_FM) or confirm there is none (NO_FM).
+            # DOUBLE_FM: another frontmatter block exists deeper in the file
+            # (e.g. garbled PDF content between two frontmatter blocks).
+            if len(fences) >= 2 and _is_likely_frontmatter("\n".join(lines[fences[1][0] + 1 : fences[1][1]])):
+                # The second block is the real frontmatter; merge it to line 1.
+                real_start, real_end = fences[1]
+                real_yaml = fix_smart_quotes("\n".join(lines[real_start + 1 : real_end]))
+                # Merge fields: real frontmatter takes priority, but keep content_fingerprint
+                # from the first (script-added) block if newer.
+                first_yaml = fixed_yaml
+                # Extract fingerprint from first block if present.
+                fp_match = re.search(r"content_fingerprint:\s*(.+)", first_yaml)
+                first_fp = fp_match.group(1).strip() if fp_match else None
+                if first_fp and "content_fingerprint:" not in real_yaml:
+                    real_yaml = real_yaml.rstrip() + f"\ncontent_fingerprint: {first_fp}\n"
+                # Remove everything from first fence start to real fence end, then real body.
+                body = "\n".join(lines[real_end + 1 :])
+                new_text = "---\n" + real_yaml.rstrip("\n") + "\n---\n\n" + body.lstrip("\n")
+                path.write_text(new_text, encoding="utf-8")
+                changed_parts.append("双重 frontmatter 合并")
+                if real_yaml != fix_smart_quotes("\n".join(lines[real_start + 1 : real_end])):
+                    changed_parts.append("弯引号修复")
+                return f"DOUBLE_FM 修复（{'; '.join(changed_parts)}）"
+
+            if quote_fixed:
+                # Simple smart-quote fix in the existing frontmatter.
+                new_text = "---\n" + fixed_yaml.rstrip("\n") + raw[raw.find("---", 3) + 3:]
+                path.write_text(new_text, encoding="utf-8")
+                return "弯引号修复（frontmatter smart quotes → straight quotes）"
+
+        return None  # OK_FM, no issues found.
+
+    # --- BROKEN_FM: preamble first, YAML between later --- fences. ---
     first_fence = None
     for i, ln in enumerate(lines):
         if ln.strip() == "---":
@@ -116,9 +195,7 @@ def process(path: Path) -> str | None:
             break
 
     if first_fence is not None and first_fence > 0:
-        # BROKEN_FM: preamble first, YAML between the two --- fences.
         preamble_lines = lines[:first_fence]
-        # Find the second ---.
         second_fence = None
         for j in range(first_fence + 1, len(lines)):
             if lines[j].strip() == "---":
@@ -126,13 +203,15 @@ def process(path: Path) -> str | None:
                 break
         if second_fence is None:
             return None  # Malformed; leave untouched.
-        yaml_text = "\n".join(lines[first_fence + 1 : second_fence])
+        yaml_text = fix_smart_quotes("\n".join(lines[first_fence + 1 : second_fence]))
         body = "\n".join(lines[second_fence + 1 :])
         fingerprint, inbox_date, kept_quote = extract_preamble_metadata(preamble_lines)
         changed = []
         if fingerprint and not yaml_has_field(yaml_text, "content_fingerprint"):
             yaml_text = inject_field(yaml_text, "content_fingerprint", fingerprint)
             changed.append("移入 content_fingerprint")
+        if yaml_text != fix_smart_quotes("\n".join(lines[first_fence + 1 : second_fence])):
+            changed.append("弯引号修复")
         # Rebuild: frontmatter first.
         new_parts = ["---", yaml_text.rstrip("\n"), "---", ""]
         if kept_quote:
@@ -144,9 +223,7 @@ def process(path: Path) -> str | None:
         path.write_text(new_text, encoding="utf-8")
         return f"BROKEN_FM 修复（frontmatter 提至第1行{'; ' + '; '.join(changed) if changed else ''}）"
 
-    # NO_FM: no --- at all.
-    # Collect the leading contiguous blockquote run (lines starting with `>` plus blank lines between them),
-    # stopping at the first non-blockquote, non-blank line.
+    # --- NO_FM: no --- at all. ---
     body_lines = []
     in_preamble = True
     preamble_quote = []
@@ -156,7 +233,7 @@ def process(path: Path) -> str | None:
                 preamble_quote.append(ln)
                 continue
             if ln.strip() == "":
-                continue  # Skip blank lines between blockquotes.
+                continue
             in_preamble = False
         body_lines.append(ln)
     body = "\n".join(body_lines)
@@ -164,7 +241,7 @@ def process(path: Path) -> str | None:
 
     type_ = "index" if path.name == "README.md" else "reference"
     title = derive_title(path, body)
-    yaml_text = synthesize_yaml(title, type_, inbox_date, fingerprint)
+    yaml_text = fix_smart_quotes(synthesize_yaml(title, type_, inbox_date, fingerprint))
     new_parts = ["---", yaml_text.rstrip("\n"), "---"]
     if kept_quote:
         new_parts.append("")

@@ -65,7 +65,7 @@ def collect_resources(dir_path: Path) -> list[dict]:
         except OSError:
             continue
         fm = parse_frontmatter(text)
-        if fm.get("type", "").strip() != "reference":
+        if fm.get("type", "reference").strip() not in ("reference", ""):
             continue
         title = strip_quotes(fm.get("title", "")).strip() or md.stem
         created = fm.get("created", "").strip()

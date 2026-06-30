@@ -142,11 +142,15 @@ def find_invalid_frontmatter(text: str) -> str | None:
     contains ': ' (colon+space), which YAML parses as a nested mapping and breaks
     Obsidian properties / Dataview even though the `---` fences are on line 1.
 
+    Also detects smart/curly quotes (“”‘’) which YAML does not
+    recognize as string delimiters — values wrapped in them are effectively unquoted.
+
     Returns a description of the first offending line, or None. Only unquoted
-    scalars are flagged; quoted strings, flow collections ([...]/{...}), list
-    items, and empty values are skipped. `sha256:abc` (colon with no space) is
-    safe and not flagged.
+    scalars are flagged; properly quoted strings (straight "" or ''), flow
+    collections ([...]/{...}), list items, and empty values are skipped.
+    `sha256:abc` (colon with no space) is safe and not flagged.
     """
+    SMART_QUOTES = {'“', '”', '‘', '’'}  # " " ' '
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
         return None
@@ -168,6 +172,11 @@ def find_invalid_frontmatter(text: str) -> str | None:
         value = m.group(1).strip()
         if not value:
             continue
+        # Check for smart/curly quotes — if the value starts or ends with one,
+        # YAML won't recognize it as a quoted string.
+        if value[0] in SMART_QUOTES or (len(value) > 1 and value[-1] in SMART_QUOTES):
+            key = line.split(":", 1)[0].strip()
+            return f'smart/curly quotes in `{key}`: {line.strip()}'
         if value[0] in {'"', "'"} or value[0] in {'[', '{'}:
             continue  # quoted scalar or flow collection
         if ": " in value:
@@ -441,25 +450,67 @@ def quote_yaml(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def insert_frontmatter_fields(text: str, fields: dict[str, str]) -> str:
-    lines = text.splitlines(keepends=True)
-    start = None
-    for idx, line in enumerate(lines[:5]):
-        if line.strip() == "---":
-            start = idx
-            break
-        if line.strip() and not line.startswith("> Organized from Inbox"):
-            break
-    if start is None:
-        block = ["---\n", *[f"{key}: {quote_yaml(value)}\n" for key, value in fields.items()], "---\n", "\n"]
-        return "".join(block + lines)
-    end = None
-    for idx in range(start + 1, len(lines)):
+def find_frontmatter_block(lines: list[str]) -> tuple[int | None, int | None]:
+    """Return (start, end) indices for a YAML frontmatter block anywhere in the file,
+    or (None, None) if none found."""
+    for idx in range(len(lines)):
         if lines[idx].strip() == "---":
-            end = idx
-            break
+            for j in range(idx + 1, min(idx + 50, len(lines))):
+                if lines[j].strip() == "---":
+                    block_text = "".join(lines[idx + 1 : j])
+                    if re.search(r"^\w[\w-]*:\s+", block_text, re.MULTILINE):
+                        return idx, j
+            # Only check the first `---` if it's near the top; otherwise skip malformed.
+            if idx > 10:
+                break
+    return None, None
+
+
+def insert_frontmatter_fields(text: str, fields: dict[str, str]) -> str:
+    """Insert metadata fields into the note's frontmatter.
+
+    Searches the whole file for an existing frontmatter block (a real frontmatter
+    may be buried after garbled PDF content). Only creates a new frontmatter block
+    when no existing block is found anywhere.
+    """
+    lines = text.splitlines(keepends=True)
+
+    # Quick check: frontmatter at line 0?
+    start, end = None, None
+    if lines and lines[0].strip() == "---":
+        start = 0
+        for idx in range(1, len(lines)):
+            if lines[idx].strip() == "---":
+                end = idx
+                break
+    else:
+        # Check for preamble + frontmatter (blockquote then ---).
+        for idx, line in enumerate(lines[:8]):
+            if line.strip() == "---":
+                start = idx
+                for j in range(idx + 1, min(idx + 50, len(lines))):
+                    if lines[j].strip() == "---":
+                        end = j
+                        break
+                break
+            if line.strip() and not line.startswith("> Organized from Inbox"):
+                break  # Non-preamble, non-fence content → no frontmatter at top.
+
+    # If still not found, search deeper for any frontmatter block.
+    if start is None:
+        start, end = find_frontmatter_block(lines)
+
+    if start is None:
+        # No frontmatter anywhere; prepend a new one.
+        block = ["---\n",
+                 *[f"{key}: {quote_yaml(value)}\n" for key, value in fields.items()],
+                 "---\n", "\n"]
+        return "".join(block + lines)
+
+    # Insert fields into the found frontmatter block.
     if end is None:
         return text
+
     existing = set()
     for line in lines[start + 1 : end]:
         if ":" in line:
