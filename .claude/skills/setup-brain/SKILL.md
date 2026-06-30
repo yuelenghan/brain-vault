@@ -1,21 +1,21 @@
 ---
 name: setup-brain
-description: Initialize brain-vault — interview the user for identity and goals, generate CLAUDE.md, check PARA directories, git status, local conversion tools (markitdown, Pillow, whisper, ffmpeg) and AI CLIs (copilot, codex), and install missing tools on user confirmation.
+description: Initialize a brain-vault — interview the user for identity and goals, generate CLAUDE.md, check PARA directories, git status, local conversion tools (markitdown, Pillow, whisper, ffmpeg) and AI CLIs (copilot, codex), and install missing tools on user confirmation. Triggers: setup brain, initialize brain-vault, 初始化 brain-vault, 安装工具.
 ---
 
 # Setup Brain
 
-You are the brain-vault initialization wizard. The goal is a safe, repeatable initialization in the current vault root. Do not read or exfiltrate credentials. Do not delete user files. Confirm before running install commands, overwriting existing config, committing to git, or setting up scheduled tasks.
+You are the brain-vault initialization wizard. The goal is a safe, repeatable initialization in the current vault root. Do not read or exfiltrate credentials. Do not delete user files. Confirm before running install commands, overwriting existing config, committing to git, or scheduling tasks.
 
-## Preconditions
+## Prerequisites
 
 - The working directory should be the brain-vault root.
-- If the current directory is not a git repo, explain first and ask whether to init git.
-- If `CLAUDE.md` already contains real user content, do not silently overwrite; read it first and state which sections will be updated.
+- If the current directory is not a git repository, say so first and ask whether to initialize git.
+- If `CLAUDE.md` already contains real user content, do not silently overwrite it; read it first and explain which sections will be updated.
 
 ## Initialization flow
 
-### 1. Precheck
+### 1. Pre-check
 
 Run and record:
 
@@ -39,29 +39,29 @@ If there are uncommitted changes, do not auto-overwrite the related files; list 
 
 ### 2. Interview the user
 
-Ask for the necessary information in one pass to avoid repeated interruptions:
+Ask for the essential information in one pass to avoid repeated interruptions:
 
 1. Who are you? Role, main responsibilities, professional focus?
-2. What are the most important goals this year or near-term?
-3. What are the active projects? One sentence each.
-4. How do you want Claude to collaborate? E.g. preference for concise conclusions, detailed reasoning, autonomous execution, cautious confirmation, etc.
-5. Which file formats do you plan to organize? Enable document/data/web/Notebook conversion (Word/PDF/PPT/Excel/TXT/CSV/JSON/HTML/EPUB/IPYNB → Markdown) and screenshot-placeholder capability (image → Markdown placeholder)?
-6. Enable audio/video transcription (audio/video → Markdown)? If yes, accept downloading the Whisper model on first real transcription, and do you need to specify a model or language?
-7. Need Copilot CLI or Codex CLI support?
-8. Need offline auto-organize? If yes, prefer manually running `organize.sh`, system crontab/launchd, or in-session Claude Code scheduling?
+2. What are the most important goals for this year or near term?
+3. What are the active projects? One sentence per project.
+4. How do you want Claude to collaborate? For example, preference for concise conclusions, detailed reasoning, autonomous execution, cautious confirmation, etc.
+5. Which file formats do you plan to organize? Should document/data/web/Notebook conversion (Word/PDF/PPT/Excel/TXT/CSV/JSON/HTML/EPUB/IPYNB → Markdown) and screenshot-placeholder capability (image → Markdown placeholder) be enabled?
+6. Should audio/video transcription (audio/video → Markdown) be enabled? If yes, do you accept downloading the Whisper model on first real transcription, and do you need to specify a model or language?
+7. Do you need Copilot CLI or Codex CLI support?
+8. Do you need offline auto-organize? If yes, do you prefer running `organize.sh` manually, system crontab/launchd, or in-session Claude Code scheduling?
 
-If the user only wants a quick init, conservative defaults are fine: keep existing collaboration preferences, create empty PARA directories, detect tools only without installing.
+If the user only wants a quick initialization, conservative defaults are acceptable: keep existing collaboration preferences, create empty PARA directories, and only detect tools without installing.
 
 ### 3. Generate or update CLAUDE.md
 
-Update from the user's answers:
+Update these sections from the user's answers:
 
-- `## Who I am`
-- `## This year's goals`
-- `## Collaboration preferences`
-- `## Current projects`
+- `## 我是谁`
+- `## 今年的目标`
+- `## 协作偏好`
+- `## 当前项目`
 
-Keep the Vault conventions, common commands, tool tiers, and project-level pitfalls below. Do not write temporary task state, one-off info, or credentials.
+Keep the Vault conventions, common commands, tool tiers, and project-level pitfalls below those sections. Do not write temporary task state, one-off information, or credentials.
 
 ### 4. Ensure directory structure
 
@@ -86,39 +86,39 @@ Archive/
 .copilot/skills/optimize-vault/
 ```
 
-Keep empty directories with `.gitkeep`.
+Preserve empty directories with `.gitkeep`.
 
 ### 5. Tool detection and install guidance
 
 #### Basic detection
 
-- `markitdown`: for `.doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf/.txt/.text/.markdown/.csv/.json/.jsonl/.html/.htm/.epub/.ipynb` → Markdown.
-- `Pillow`: for `.png/.jpg/.jpeg/.webp` → screenshot-placeholder Markdown.
-- `whisper`: for `.mp3/.m4a/.wav/.mp4/.mov/.aac/.aiff/.flac/.ogg/.opus/.webm` → Markdown.
-- `ffmpeg`: local dependency Whisper needs to decode audio/video.
+- `markitdown`: converts `.doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf/.txt/.text/.markdown/.csv/.json/.jsonl/.html/.htm/.epub/.ipynb` to Markdown.
+- `Pillow`: generates screenshot-placeholder Markdown for `.png/.jpg/.jpeg/.webp`.
+- `whisper`: converts `.mp3/.m4a/.wav/.mp4/.mov/.aac/.aiff/.flac/.ogg/.opus/.webm` to Markdown.
+- `ffmpeg`: local dependency required by Whisper to decode audio/video.
 - Whisper model: the first real transcription may download the default model; verify the current default model and `--model` parameter with `whisper --help`, and specify via `WHISPER_MODEL` if needed.
-- `copilot` / `gh copilot`: for GitHub Copilot CLI.
-- `codex`: for OpenAI Codex CLI.
-- `uv`, `brew`, `npm`, `python3`: for recommending install paths.
+- `copilot` / `gh copilot`: for the GitHub Copilot CLI.
+- `codex`: for the OpenAI Codex CLI.
+- `uv`, `brew`, `npm`, `python3`: used to decide the recommended install path.
 
 #### Install principles
 
-- Cloning the repo does not auto-install any tool.
-- Detection only needs no confirmation; confirm before running install commands.
+- Cloning the repository does not install any tool.
+- Detection only needs no confirmation; confirm before running any install command.
 - Prefer giving commands and letting the user decide whether to run them.
-- Do not guess package names or parameters; before installing, verify the command with the existing tool's `--help` or official/local docs. When unverifiable, state the uncertainty and let the user install manually.
+- Do not guess package names or parameters; before installing, verify the command against `--help` or official/local docs of an existing tool. When verification is impossible, state the uncertainty and let the user install manually.
 
 #### Recommended install paths
 
-If the user enables document conversion and lacks `markitdown`:
+If the user enables document conversion and `markitdown` is missing:
 
-1. If `uv` is present, first run `uv tool install --help` to verify the command exists, then suggest:
+1. If `uv` is available, first run `uv tool install --help` to verify the command exists, then suggest:
 
    ```bash
    uv tool install markitdown
    ```
 
-2. If no `uv` but `python3` is present, suggest the user pick their own Python package manager to install MarkItDown; do not guess a global pip strategy for them.
+2. If there is no `uv` but `python3` is available, suggest the user pick their own Python package manager to install MarkItDown; do not guess a global pip strategy for them.
 3. Verify after install:
 
    ```bash
@@ -135,7 +135,7 @@ If the user enables audio transcription:
    command -v ffmpeg || true
    ```
 
-2. If `whisper` is missing and `brew` is present, first run `brew info openai-whisper` to verify the formula exists; if the output shows it depends on `ffmpeg`, Homebrew will handle that dependency, then suggest:
+2. If `whisper` is missing and `brew` is available, first run `brew info openai-whisper` to verify the formula exists; if the output shows it depends on `ffmpeg`, Homebrew will handle that dependency, then suggest:
 
    ```bash
    brew install openai-whisper
@@ -147,8 +147,8 @@ If the user enables audio transcription:
    brew install ffmpeg
    ```
 
-4. If no `brew` but `uv` is present, first run `uv pip install --help` to verify the command exists; installing Whisper via Python usually needs a target environment, and `ffmpeg` may still need separate install — let the user choose the environment first; do not silently install globally.
-5. If the user already has a Python or system package manager, allow them to provide the install command.
+4. If there is no `brew` but `uv` is available, first run `uv pip install --help` to verify the command exists; installing Whisper via Python usually needs a target environment and `ffmpeg` may still need a separate install, so let the user choose the environment first; do not silently install globally.
+5. If the user already has a Python or system package manager workflow, allow them to provide the install command.
 6. Verify after install:
 
    ```bash
@@ -158,36 +158,36 @@ If the user enables audio transcription:
    ffmpeg -version
    ```
 
-`whisper --help` shows the current default model and `--model` parameter; if the default is not what the user wants, suggest running organize with `WHISPER_MODEL=<model name>`. Whisper models can be large and the first real transcription may download one; do not silently trigger a model download at setup time — remind the user before real transcription.
+`whisper --help` shows the current default model and the `--model` parameter; if the default is not the model the user wants, suggest running organize with `WHISPER_MODEL=<model>`. Whisper models can be large and the first real transcription may download one; do not silently trigger a model download at setup time — remind the user before a real transcription.
 
 If the user enables Copilot CLI support:
 
-1. If `copilot` is present, run `copilot --help` to verify it works.
-2. If no `copilot` but `gh` is present, run `gh copilot --help` to verify GitHub CLI support; you may suggest the user start with `gh copilot` or download Copilot CLI.
+1. If `copilot` is available, run `copilot --help` to verify it works.
+2. If there is no `copilot` but `gh` is available, run `gh copilot --help` to verify GitHub CLI support; you may suggest the user start with `gh copilot` or download the Copilot CLI.
 3. Confirm before login, download, update, or modifying Copilot config.
-4. Note that `.github/copilot-instructions.md` is this repo's Copilot instructions file, and `.copilot/.github/plugin/plugin.json` and `.copilot/skills/*/SKILL.md` are in-project Copilot CLI plugin skills; before running `copilot init`, check whether it would overwrite existing customization.
+4. Explain that `.github/copilot-instructions.md` is this repo's Copilot instructions file, and `.copilot/.github/plugin/plugin.json` and `.copilot/skills/*/SKILL.md` are in-project Copilot CLI plugin skills; before running `copilot init`, check whether it would overwrite existing customizations.
 
 If the user enables Codex CLI support:
 
-1. If `codex` is present, run `codex --help` to verify it works; if the command exists but reports a missing binary or startup failure, suggest reinstalling or repairing.
-2. If no `codex` but `npm` is present, suggest:
+1. If `codex` is available, run `codex --help` to verify it works; if the command exists but reports a missing binary or fails to start, suggest the user reinstall or repair it.
+2. If there is no `codex` but `npm` is available, suggest:
 
    ```bash
    npm install -g @openai/codex
    ```
 
-3. If `brew` is present, suggest:
+3. If `brew` is available, suggest:
 
    ```bash
    brew install --cask codex
    ```
 
 4. Confirm before installing, logging in, or configuring an API key.
-5. Note that `AGENTS.md` is the general agent instructions file, and `.codex/skills/*/SKILL.md` are in-project Codex skills, for Codex CLI and other agents to reference.
+5. Explain that `AGENTS.md` is the generic agent instructions file, and `.codex/skills/*/SKILL.md` are in-project Codex skills, referenced by Codex CLI and other agents.
 
 ### 6. Wrapper check
 
-Confirm these files exist and are executable:
+Confirm the following files exist and are executable:
 
 ```bash
 test -x .claude/bin/safe-markitdown
@@ -217,13 +217,13 @@ python3 -m json.tool .copilot/.github/plugin/plugin.json >/tmp/brain-vault-plugi
 
 ### 7. Optional auto-organize
 
-If the user wants auto-organize, explain three options:
+If the user wants auto-organize, explain the three options:
 
-- In-session: trigger `/organize-inbox` via Claude Code scheduling, but session close or task expiry affects runs.
-- System-level: call `VAULT=/path/to/brain .claude/organize.sh` via crontab/launchd.
+- In-session: use a Claude Code scheduled task to trigger `/organize-inbox`; closing the session or task expiry affects execution.
+- System-level: use crontab/launchd to run `VAULT=/path/to/brain .claude/organize.sh`.
 - Manual: periodically run `/organize-inbox` or `.claude/organize.sh`.
 
-Confirm before modifying system crontab/launchd.
+Confirm before modifying the system crontab/launchd.
 
 ### 8. Final verification and output
 
@@ -236,6 +236,6 @@ git status --short
 Keep the output concise:
 
 - Initialized identity-layer sections.
-- Tool status: `markitdown` installed/not installed, `whisper` installed/not installed, `ffmpeg` installed/not installed, Whisper default model / model-download reminder, `copilot` installed/not installed, `codex` installed/not installed.
-- Enabled capabilities: Markdown organize, document/data/web/Notebook conversion, screenshot placeholder, audio/video transcription, organized-note optimization, Copilot CLI instructions and plugin skills, Codex/general-agent instructions and in-project skills.
-- Next steps: put material into `Inbox/` and run `/organize-inbox`; run `/optimize-vault` when you want a health check on organized notes.
+- Tool status: `markitdown` installed/missing, `whisper` installed/missing, `ffmpeg` installed/missing, Whisper default model/model-download reminder, `copilot` installed/missing, `codex` installed/missing.
+- Enabled capabilities: Markdown organizing, document/data/web/Notebook conversion, screenshot placeholder, audio/video transcription, organized-note optimization, Copilot CLI instructions and plugin skills, Codex/generic-agent instructions and in-project skills.
+- Next steps: put material into `Inbox/` and run `/organize-inbox`; run `/optimize-vault` when you want a health check on already-organized notes.
