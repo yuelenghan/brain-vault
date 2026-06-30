@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-DEFAULT_SCOPES = ("Projects", "Areas", "Resources", "Archive")
+DEFAULT_SCOPES: list[str] = ["Projects", "Areas", "Resources", "Archive"]
 TRACKING_PARAMS = {"fbclid", "gclid", "msclkid", "dclid", "igshid"}
 TRACKING_PREFIXES = ("utm_",)
 WIKILINK_RE = re.compile(r"!?(?<!\!)\[\[([^\]]+)\]\]")
@@ -307,20 +307,22 @@ def read_note(vault: Path, path: Path, protected: set[str]) -> Note:
     )
 
 
-def build_index(vault: Path, scopes: list[str], protected: set[str]) -> tuple[list[Note], dict[str, list[Note]]]:
+def build_index(vault: Path, scopes: list[str], protected: set[str]) -> tuple[list[Note], dict[str, list[Note]], set[str]]:
     notes = [read_note(vault, path, protected) for path in iter_markdown(vault, scopes)]
     by_name: dict[str, list[Note]] = defaultdict(list)
+    file_stems: set[str] = set()
     for note in notes:
         names = {note.title, Path(note.path).stem, *note.aliases}
         for name in names:
             if name:
                 by_name[normalize_name(name)].append(note)
+        file_stems.add(normalize_name(Path(note.path).stem))
     for note in notes:
         for link in note.wikilinks:
             matches = by_name.get(normalize_name(link), [])
             for match in matches:
                 match.inbound_count += 1
-    return notes, by_name
+    return notes, by_name, file_stems
 
 
 def canonical_score(note: Note) -> tuple[int, int, int, int, int, str]:
@@ -375,18 +377,121 @@ def duplicate_groups(notes: list[Note]) -> list[dict]:
     return sorted(results, key=lambda item: item["canonical"])
 
 
-def broken_links(notes: list[Note], by_name: dict[str, list[Note]]) -> list[dict]:
+def broken_links(notes: list[Note], by_name: dict[str, list[Note]], file_stems: set[str]) -> list[dict]:
+    """Find wikilinks whose target does not match any existing file's filename stem.
+
+    Obsidian resolves [[X]] → X.md by **filename**, not by frontmatter title
+    or alias. A wikilink that matches a note's title but not its filename is
+    still broken — Obsidian will create a 0-byte stub file when the link is
+    clicked. This function checks file_stems first; title/alias matches are
+    treated as "soft match" findings that need the wikilink text updated to
+    use the actual filename stem.
+    """
     findings: list[dict] = []
     for note in notes:
         for link in sorted(set(note.wikilinks)):
             key = normalize_name(link)
-            matches = [match.path for match in by_name.get(key, [])]
-            if not matches:
-                # Looser title contains fallback, report only unless unique.
+            # Primary check: does any FILE have this exact stem?
+            if key in file_stems:
+                continue  # Valid: Obsidian resolves [[link]] → link.md
+            # No file stem matches — the wikilink is broken in Obsidian
+            # Check for soft matches via title/alias (notes that SHOULD be the target)
+            soft_matches = [m.path for m in by_name.get(key, [])]
+            if soft_matches:
+                # Wikilink matches a note's title/alias but not its filename
+                # → Obsidian will create a stub; fix by changing link to actual filename
+                unique_matches = sorted(set(soft_matches))
+                findings.append({
+                    "source": note.path,
+                    "link": link,
+                    "matches": unique_matches,
+                    "status": "unique" if len(unique_matches) == 1 else "ambiguous",
+                })
+            else:
+                # No match at all — try loose substring fallback on title
                 loose = [n.path for n in notes if key and key in normalize_name(n.title)]
                 finding = {"source": note.path, "link": link, "matches": sorted(set(loose))}
                 finding["status"] = "unique" if len(set(loose)) == 1 else "ambiguous"
                 findings.append(finding)
+    return findings
+
+
+def empty_stubs(vault: Path, notes: list[Note], by_name: dict[str, list[Note]]) -> list[dict]:
+    """Detect 0-byte .md stubs auto-created by Obsidian when a broken wikilink is clicked.
+
+    Obsidian creates a 0-byte file at the path the wikilink expects when the user
+    clicks a [[wikilink]] whose target does not exist. For bare [[Note Name]], the
+    stub lands at the vault root; for [[Inbox/Note Name]], it lands in Inbox/.
+
+    These stubs are invisible to the script's normal scan (only PARA dirs), and
+    their existence causes further issues: the next optimize-vault scan sees the
+    stub as an existing file and considers the link "resolved", even though the
+    stub is empty and the real note lives elsewhere.
+
+    Returns a list of findings, each with:
+      - stub: relative path of the 0-byte stub
+      - references: list of {source path, link text} that point to this stub
+      - suggested_target: path of the closest-matching real note (or None)
+    """
+    skip_prefixes = (".claude/", ".git/", ".obsidian/")
+    findings: list[dict] = []
+
+    # Collect all known note names for matching
+    all_names: dict[str, list[str]] = defaultdict(list)  # normalized → [path]
+    for note in notes:
+        for name in {note.title, Path(note.path).stem, *note.aliases}:
+            if name:
+                all_names[normalize_name(name)].append(note.path)
+
+    for path in sorted(vault.rglob("*.md")):
+        rel = path.relative_to(vault).as_posix()
+        if any(rel.startswith(p) for p in skip_prefixes):
+            continue
+        if path.stat().st_size != 0:
+            continue
+        # 0-byte .md file found — almost certainly an Obsidian stub
+        stub_stem = path.stem
+        stub_key = normalize_name(stub_stem)
+        # Find wikilinks across all notes that resolve to this stub
+        references: list[dict] = []
+        for note in notes:
+            for link in sorted(set(note.wikilinks)):
+                link_key = normalize_name(link)
+                if link_key == stub_key:
+                    references.append({"source": note.path, "link": link})
+        # Find the closest real note: prefer loose title match (stub stem is
+        # a prefix/substring of the real note's name)
+        suggested_target: str | None = None
+        match_candidates: list[str] = []
+        for norm_name, paths in all_names.items():
+            if stub_key and stub_key in norm_name:
+                match_candidates.extend(paths)
+        # For Inbox/ stubs, also check if there's a note with the same stem
+        # in a PARA directory (common after organize-inbox moves)
+        if not match_candidates:
+            for note in notes:
+                if Path(note.path).stem == stub_stem:
+                    match_candidates.append(note.path)
+        if len(match_candidates) == 1:
+            suggested_target = match_candidates[0]
+        elif len(match_candidates) > 1:
+            # Prefer Resources/ → non-Duplicates → shortest path
+            def _stub_target_score(p: str) -> tuple:
+                return (
+                    0 if p.startswith("Resources/") else 1,
+                    0 if "Duplicates" not in p else 1,
+                    len(p),
+                )
+            suggested_target = sorted(set(match_candidates), key=_stub_target_score)[0]
+
+        findings.append(
+            {
+                "stub": rel,
+                "references": references,
+                "suggested_target": suggested_target,
+                "status": "fixable" if suggested_target and references else ("orphan_stub" if not references else "unmatched"),
+            }
+        )
     return findings
 
 
@@ -618,12 +723,64 @@ def apply_broken_links(vault: Path, notes: list[Note], report: dict) -> None:
             report["skipped_uncertain"].append({"type": "protected_broken_link", "path": note.path})
             continue
         target_path = item["matches"][0]
-        target_title = by_path[target_path].title if target_path in by_path else Path(target_path).stem
+        # Use filename stem (Obsidian resolves wikilinks by filename, not title)
+        target_stem = Path(target_path).stem
         text = note.abs_path.read_text(encoding="utf-8")
-        new_text = replace_wikilink(text, item["link"], target_title)
+        new_text = replace_wikilink(text, item["link"], target_stem)
         if new_text != text:
             note.abs_path.write_text(new_text, encoding="utf-8")
-            report["applied"]["broken_links"].append({"source": note.path, "old": item["link"], "new": target_title})
+            report["applied"]["broken_links"].append({"source": note.path, "old": item["link"], "new": target_stem})
+
+
+def apply_empty_stubs(vault: Path, report: dict) -> None:
+    """Delete 0-byte Obsidian stub files and fix the wikilinks that caused them.
+
+    For each fixable stub (has referencing wikilinks AND a suggested real target):
+    1. Fix all wikilinks that point to the stub → point to the real note's filename stem
+    2. Delete the stub file (via git rm --cached + rm, or just rm for untracked)
+
+    Stubs with no suggested target (orphan_stub / unmatched) are only reported,
+    not auto-deleted — manual review is needed to find the correct target.
+    """
+    for item in report.get("empty_stubs", []):
+        if item["status"] != "fixable":
+            report["skipped_uncertain"].append({"type": "unfixable_stub", **item})
+            continue
+
+        stub_path = vault / item["stub"]
+        # Fix referencing wikilinks first
+        target_path = item["suggested_target"]
+        if target_path:
+            # Find the source notes and fix their wikilinks
+            for ref in item["references"]:
+                source_note_path = vault / ref["source"]
+                if not source_note_path.exists():
+                    continue
+                # Check if protected
+                if ref["source"] in set(report.get("protected_paths", [])):
+                    report["skipped_uncertain"].append(
+                        {"type": "protected_stub_reference", "stub": item["stub"], "source": ref["source"]}
+                    )
+                    continue
+                text = source_note_path.read_text(encoding="utf-8")
+                new_text = replace_wikilink(text, ref["link"], Path(target_path).stem)
+                if new_text != text:
+                    source_note_path.write_text(new_text, encoding="utf-8")
+
+        # Delete the stub file
+        if stub_path.exists():
+            # Check git tracking
+            completed = run_git(vault, ["ls-files", "--error-unmatch", item["stub"]])
+            if completed.returncode == 0:
+                # Tracked — use git rm
+                run_git(vault, ["rm", "-f", item["stub"]])
+            else:
+                # Untracked — just remove
+                stub_path.unlink()
+
+        report["applied"]["empty_stubs"].append(
+            {"stub": item["stub"], "target": Path(target_path).stem if target_path else None}
+        )
 
 
 def append_log(vault: Path, report: dict, date: str) -> None:
@@ -636,6 +793,7 @@ def append_log(vault: Path, report: dict, date: str) -> None:
         f"- Suspected duplicates: 0\n"
         f"- Link additions: 0\n"
         f"- Broken links fixed: {len(report['applied']['broken_links'])}\n"
+        f"- Empty stubs cleaned: {len(report['applied']['empty_stubs'])}\n"
         f"- Metadata backfilled: {len(report['applied']['metadata'])}\n"
         f"- Invalid frontmatter values: {len(report.get('invalid_frontmatter', []))}\n"
         f"- Structure suggestions: {len(report['orphan_notes'])}\n"
@@ -647,18 +805,20 @@ def append_log(vault: Path, report: dict, date: str) -> None:
 
 def build_report(vault: Path, scopes: list[str]) -> dict:
     protected = protected_paths(vault)
-    notes, by_name = build_index(vault, scopes, protected)
+    notes, by_name, file_stems = build_index(vault, scopes, protected)
+    empty_stub_findings = empty_stubs(vault, notes, by_name)
     report = {
         "scope": scopes,
         "coverage": coverage(notes),
         "protected_paths": sorted(protected),
         "duplicates": duplicate_groups(notes),
-        "broken_links": broken_links(notes, by_name),
+        "broken_links": broken_links(notes, by_name, file_stems),
+        "empty_stubs": empty_stub_findings,
         "metadata_missing": metadata_missing(notes),
         "orphan_notes": orphan_notes(notes),
         "invalid_fingerprints": invalid_fingerprints(notes),
         "invalid_frontmatter": invalid_frontmatter_list(notes),
-        "applied": {"duplicates": [], "metadata": [], "broken_links": []},
+        "applied": {"duplicates": [], "metadata": [], "broken_links": [], "empty_stubs": []},
         "report_only": {"suspected_duplicates": [], "structure_suggestions": []},
         "skipped_uncertain": [],
         "verification": {},
@@ -707,6 +867,16 @@ def markdown_report(report: dict) -> str:
         f"- `{item['path']}`: {item['detail']}"
         for item in report.get("invalid_frontmatter", [])
     ]
+    empty_stub_lines = [
+        f"- `{item['stub']}` -> suggested target `{item['suggested_target']}` (referenced by: {', '.join('`' + r['source'] + '`' for r in item['references'])})"
+        for item in report.get("empty_stubs", [])
+        if item["status"] == "fixable"
+    ]
+    unfixable_stub_lines = [
+        f"- `{item['stub']}` ({item['status']})"
+        for item in report.get("empty_stubs", [])
+        if item["status"] != "fixable"
+    ]
     lines = [
         "## Scope and scan results",
         f"- Scope: {', '.join(report['scope'])}",
@@ -717,6 +887,7 @@ def markdown_report(report: dict) -> str:
         f"- Link additions: none (semantic link additions are only suggested by the model based on the script report)",
         f"- Metadata backfill: {len(report['applied']['metadata']) or 'none'}",
         f"- Broken links fixed: {len(report['applied']['broken_links']) or 'none'}",
+        "- Empty stubs cleanup: " + ("\n" + "\n".join(empty_stub_lines) if empty_stub_lines else "none"),
         "",
         "## Report only, not auto-processed",
         "- Exact duplicate candidates: " + ("; ".join(duplicate_lines) if duplicate_lines else "none"),
@@ -728,6 +899,7 @@ def markdown_report(report: dict) -> str:
         "- protected paths: " + (", ".join(f"`{p}`" for p in report["protected_paths"]) if report["protected_paths"] else "none"),
         "- Uncertain matches: " + uncertain_summary,
         "- Insufficient evidence: " + evidence_summary,
+        "- Unfixable empty stubs: " + ("\n" + "\n".join(unfixable_stub_lines) if unfixable_stub_lines else "none"),
         "",
         "## Verification results",
         f"- git status: {report['verification'].get('git_status', 'not checked')}",
@@ -747,7 +919,12 @@ def safe_self_check(vault: Path, report: dict) -> None:
         if not (vault / item["duplicate"]).exists():
             duplicate_missing = True
             break
-    report["verification"]["self_check"] = "passed" if not bad_delete and not duplicate_missing else "failed"
+    stub_not_deleted = False
+    for item in report["applied"]["empty_stubs"]:
+        if (vault / item["stub"]).exists():
+            stub_not_deleted = True
+            break
+    report["verification"]["self_check"] = "passed" if not bad_delete and not duplicate_missing and not stub_not_deleted else "failed"
 
 
 def checked_report_path(raw: str, expected: Path, label: str) -> Path:
@@ -802,7 +979,7 @@ def main(argv: list[str]) -> int:
         markdown_path = checked_report_path(args.markdown_path, FIXED_MARKDOWN_REPORT, "Markdown") if args.markdown_path else None
     except ValueError as exc:
         return fail(str(exc))
-    scopes = args.scope or list(DEFAULT_SCOPES)
+    scopes: list[str] = args.scope or DEFAULT_SCOPES
     for scope in scopes:
         scope_path = (vault / scope).resolve()
         if not is_relative_inside(scope_path, vault):
@@ -811,13 +988,14 @@ def main(argv: list[str]) -> int:
     report = build_report(vault, scopes)
     if args.mode == "apply-safe":
         protected = set(report["protected_paths"])
-        notes, _by_name = build_index(vault, scopes, protected)
+        notes, _by_name, _file_stems = build_index(vault, scopes, protected)
         date = args.date or "undated"
         apply_metadata(notes, report)
-        notes, _by_name = build_index(vault, scopes, protected)
+        notes, _by_name, _file_stems = build_index(vault, scopes, protected)
         apply_duplicates(vault, notes, report, date)
-        notes, by_name = build_index(vault, scopes, protected)
+        notes, _by_name, _file_stems = build_index(vault, scopes, protected)
         apply_broken_links(vault, notes, report)
+        apply_empty_stubs(vault, report)
         if not args.no_log:
             append_log(vault, report, date)
         safe_self_check(vault, report)

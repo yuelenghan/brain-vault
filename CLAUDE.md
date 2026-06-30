@@ -59,3 +59,5 @@
 - `organize.sh` 的默认 `VAULT` 应指向当前仓库根；不要写死某个人机器上的绝对路径。
 - 整理提交禁止 `git add -A`；只暂存本次整理相关文件，避免混入无关工作区改动。
 - 本机工具不会随 git clone 自动安装；`/setup-brain` 只做检测和引导，执行安装、登录或修复 CLI 前必须获得用户确认。
+- 整理标记中的 wikilink **禁止带 `Inbox/` 前缀**（如 `[[Inbox/xxx]]`）。笔记 `git mv` 离开 Inbox 后，带 `Inbox/` 的 wikilink 指向不存在的路径，Obsidian 点击即自动创建 0 字节空文件 → Inbox 残留。正确写法：`[[笔记名]]`（仅用笔记名，不加路径前缀）；已 Markdown 文件的整理标记不加任何 `原始文件` 自指向链接。
+- **Wikilink 必须匹配文件名 stem，而非 frontmatter `title`。** Obsidian 按文件名解析 `[[X]]` → `X.md`，不是按 title。若 wikilink 写的 `[[简名]]` 但实际文件叫 `简名 - 完整后缀.md`，即使 frontmatter `title: 简名` 恰好一致，Obsidian 仍找不到文件 → 自动创建 0 字节残骸。`optimize-vault` 脚本的 `broken_links` 现已改为文件名优先检测（title/alias 匹配视为软匹配需修复）；添加 wikilink 时必须验证目标 `.md` 文件实际存在。
