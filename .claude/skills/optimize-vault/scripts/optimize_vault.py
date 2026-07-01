@@ -79,7 +79,19 @@ def protected_paths(vault: Path) -> set[str]:
         if " -> " in raw:
             raw = raw.split(" -> ", 1)[1]
         raw = raw.strip('"')
-        if not raw or raw == ".claude/skills/optimize-vault" or raw.startswith(".claude/skills/optimize-vault/"):
+        if (
+            not raw
+            or raw == ".claude/skills/optimize-vault"
+            or raw.startswith(".claude/skills/optimize-vault/")
+            or raw == ".agents"
+            or raw.startswith(".agents/")
+            or raw == ".codex"
+            or raw.startswith(".codex/")
+            or raw == ".copilot"
+            or raw.startswith(".copilot/")
+            or raw == ".github"
+            or raw.startswith(".github/")
+        ):
             continue
         paths.add(raw)
     return paths
@@ -433,7 +445,7 @@ def empty_stubs(vault: Path, notes: list[Note], by_name: dict[str, list[Note]]) 
       - references: list of {source path, link text} that point to this stub
       - suggested_target: path of the closest-matching real note (or None)
     """
-    skip_prefixes = (".claude/", ".git/", ".obsidian/")
+    skip_prefixes = (".claude/", ".agents/", ".codex/", ".copilot/", ".github/", ".git/", ".obsidian/")
     findings: list[dict] = []
 
     # Collect all known note names for matching

@@ -22,7 +22,7 @@ Run and record:
 ```bash
 pwd
 git status --short
-find . -maxdepth 2 -type d \( -path './.git' -o -path './.claude' \) -prune -o -type d -print
+find . -maxdepth 2 -type d \( -path './.git' -o -path './.claude' -o -path './.agents' -o -path './.codex' -o -path './.copilot' -o -path './.github' \) -prune -o -type d -print
 command -v markitdown || true
 command -v whisper || true
 command -v ffmpeg || true
@@ -84,6 +84,7 @@ Archive/
 .copilot/skills/setup-brain/
 .copilot/skills/organize-inbox/
 .copilot/skills/optimize-vault/
+.github/
 ```
 
 Preserve empty directories with `.gitkeep`.

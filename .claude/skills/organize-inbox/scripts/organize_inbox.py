@@ -65,6 +65,17 @@ def protected_paths(vault: Path) -> set[str]:
         if " -> " in raw:
             raw = raw.split(" -> ", 1)[1]
         raw = raw.strip('"')
+        if (
+            raw == ".agents"
+            or raw.startswith(".agents/")
+            or raw == ".codex"
+            or raw.startswith(".codex/")
+            or raw == ".copilot"
+            or raw.startswith(".copilot/")
+            or raw == ".github"
+            or raw.startswith(".github/")
+        ):
+            continue
         if raw:
             paths.add(raw)
     return paths

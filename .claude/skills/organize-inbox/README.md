@@ -1,13 +1,13 @@
 # organize-inbox 维护者须知
 
 > 本文件给「改整理逻辑 / 脚本的人」看，不随 skill 运行、不随每会话自动加载。
-> 运行时硬约束在 `SKILL.md` 与 vault 根 `CLAUDE.md`，本文件只放设计 rationale 与维护流程。
+> 运行时硬约束在 `SKILL.md` 与 vault 根 `CLAUDE.md` / `AGENTS.md`，本文件只放设计 rationale 与维护流程。
 
 ## 整理逻辑源与三路径
 
-整理逻辑的唯一来源是 `SKILL.md`。三条触发路径——会话内手动、CronCreate 定时、`organize.sh` 离线兜底——都调同一份 skill。修 skill 或 `organize.sh` 后，必须用临时 vault 跑 `VAULT=<临时目录> .claude/organize.sh` 验证，覆盖"实际移动 + 提交 + 日志"完整路径，不要只看 Inbox 是否为空。
+整理逻辑的唯一来源是 `.claude/skills/organize-inbox/SKILL.md`。`.codex/skills/organize-inbox/SKILL.md` 与 `.copilot/skills/organize-inbox/SKILL.md` 是 CLI 薄入口并读取 `.claude` 规则。三条触发路径——会话内手动、CronCreate 定时、`.claude/organize.sh` 离线兜底——都调 `.claude` 这份 skill。修 skill、脚本或 `organize.sh` 后，必须用临时 vault 跑 `VAULT=<临时目录> .claude/organize.sh` 验证，覆盖"实际移动 + 提交 + 日志"完整路径，不要只看 Inbox 是否为空。
 
-`.claude/` 默认不入库；当前版本化 `organize.sh`、`skills/`、`bin/`，其余（`organize.log`、`scheduled_tasks.json` 等）被 `.gitignore` 忽略，均为本地态。
+`.claude/` 是 Claude Code/headless 运行副本，版本化 `organize.sh`、`skills/`、`bin/`，其余（`organize.log`、`scheduled_tasks.json` 等）被 `.gitignore` 忽略，均为本地态；`.codex/`、`.copilot/`、`.github/copilot-instructions.md` 也在当前 vault 维护，但只作为 CLI 入口，不拥有整理逻辑。
 
 ## CronCreate 定时整理的局限
 

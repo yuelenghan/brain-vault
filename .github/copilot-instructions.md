@@ -18,6 +18,8 @@ This repository is a personal knowledge vault template, not an application codeb
 - `Resources/`: reusable topic references.
 - `Archive/`: completed, expired, or historical material.
 - `.claude/`: Claude Code skills, wrappers, and headless organize script.
+- `.codex/`: Codex CLI project-skill entry points; thin wrappers that read `.claude/skills/*/SKILL.md`.
+- `.copilot/`: Copilot CLI plugin skills and manifest; thin wrappers that read `.claude/skills/*/SKILL.md`.
 
 ## Safety rules
 
