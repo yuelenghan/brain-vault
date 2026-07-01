@@ -10,7 +10,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,7 +20,9 @@ TRACKING_PARAMS = {"fbclid", "gclid", "msclkid", "dclid", "igshid"}
 TRACKING_PREFIXES = ("utm_",)
 WIKILINK_RE = re.compile(r"!?(?<!\!)\[\[([^\]]+)\]\]")
 URL_RE = re.compile(r"https?://[^\s)\]}>\"']+")
-FIXED_REPORT_DIR = Path(tempfile.gettempdir()).resolve()
+RESOURCE_INDEX_BEGIN = "<!-- BEGIN: resource-index -->"
+RESOURCE_INDEX_END = "<!-- END: resource-index -->"
+FIXED_REPORT_DIR = Path("/tmp").resolve()
 FIXED_JSON_REPORT = FIXED_REPORT_DIR / "optimize-vault.json"
 FIXED_MARKDOWN_REPORT = FIXED_REPORT_DIR / "optimize-vault.md"
 SOURCE_EXTENSIONS = {
@@ -71,6 +72,7 @@ class Note:
     normalized_urls: list[str]
     fingerprint: str
     stored_fingerprint: str | None
+    stored_fingerprint_field: str | None
     fingerprint_valid: bool
     invalid_frontmatter: str | None
     content_length: int
@@ -146,10 +148,6 @@ def is_relative_inside(path: Path, root: Path) -> bool:
         return False
 
 
-def is_organize_marker(line: str) -> bool:
-    return line.startswith("> Organized from Inbox") or line.startswith("> 整理自 Inbox")
-
-
 def parse_frontmatter(text: str) -> tuple[dict[str, str], list[str], str]:
     lines = text.splitlines()
     start = None
@@ -157,7 +155,7 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], list[str], str]:
         if line.strip() == "---":
             start = idx
             break
-        if line.strip() and not is_organize_marker(line):
+        if line.strip() and not line.startswith("> 整理自 Inbox"):
             break
     if start is None:
         return {}, [], text
@@ -201,7 +199,7 @@ def find_invalid_frontmatter(text: str) -> str | None:
     collections ([...]/{...}), list items, and empty values are skipped.
     `sha256:abc` (colon with no space) is safe and not flagged.
     """
-    SMART_QUOTES = {'“', '”', '‘', '’'}  # " " ' '
+    SMART_QUOTES = {"“", "”", "‘", "’"}
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
         return None
@@ -279,20 +277,68 @@ def normalize_url(url: str) -> str:
     return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, urlencode(query, doseq=True), ""))
 
 
-def normalize_body_for_hash(text: str) -> str:
+DISTILLATION_HEADING_RE = re.compile(r"^##\s*(提炼|摘要|总结|TL;DR)\s*$", re.IGNORECASE)
+SOURCE_HEADING_RE = re.compile(r"^##\s*(原文|原文\s*/\s*摘录|摘录|原始内容|正文|Transcript)\s*$", re.IGNORECASE)
+CURATED_TRAILING_HEADING_RE = re.compile(
+    r"^##\s*(关联|可能相关|相关资料|相关项目|资料索引|重复归档|后续行动|下一步)\s*$"
+)
+
+
+def source_body_for_hash(text: str) -> str:
+    """Return the source-material view used for source identity fingerprints.
+
+    `content_fingerprint` was historically produced before the model added
+    distillation and links. Recomputing it over the edited note makes normal
+    curated notes look stale. The stable identity should come from the original
+    material: keep any title/source preamble, skip the generated distillation
+    block, omit the source-section heading itself, and stop before later
+    hand-written relationship/index sections.
+    """
     _frontmatter, _aliases, body = parse_frontmatter(text)
+    lines = body.splitlines()
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if stripped == RESOURCE_INDEX_BEGIN:
+            i += 1
+            while i < len(lines) and lines[i].strip() != RESOURCE_INDEX_END:
+                i += 1
+            if i < len(lines):
+                i += 1
+            continue
+        if DISTILLATION_HEADING_RE.match(stripped):
+            source_start: int | None = None
+            j = i + 1
+            while j < len(lines):
+                if SOURCE_HEADING_RE.match(lines[j].strip()):
+                    source_start = j + 1
+                    break
+                j += 1
+            if source_start is not None:
+                i = source_start
+                continue
+        if CURATED_TRAILING_HEADING_RE.match(stripped):
+            break
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
+
+
+def normalize_body_for_hash(text: str) -> str:
+    body = source_body_for_hash(text)
     out: list[str] = []
     for line in body.splitlines():
         stripped = line.strip()
-        if is_organize_marker(stripped):
+        if stripped.startswith("> 整理自 Inbox"):
             continue
-        if "content fingerprint" in stripped or "内容指纹" in stripped or stripped.startswith("content_fingerprint:"):
+        if "内容指纹" in stripped or stripped.startswith("content_fingerprint:") or stripped.startswith("source_fingerprint:"):
             continue
         if stripped.startswith("source_url:") or stripped.startswith("canonical_url:"):
             continue
         if re.match(r"^source:\s*https?://", stripped):
             continue
-        if re.match(r"^>\s*(Source URL|Source|Duplicate content|Duplication evidence|canonical|来源 URL|来源|重复内容|重复依据)[:：]?", stripped):
+        if re.match(r"^>\s*(来源 URL|来源|重复内容|重复依据|canonical)：?", stripped):
             continue
         out.append(line)
     body = "\n".join(out)
@@ -315,7 +361,7 @@ def extract_urls(frontmatter: dict[str, str], text: str) -> list[str]:
         if value.startswith("http://") or value.startswith("https://"):
             urls.append(normalize_url(value))
     for line in text.splitlines():
-        if any(marker in line for marker in ("Source URL", "Source:", "source:", "来源 URL", "来源：", "来源:")):
+        if any(marker in line for marker in ("来源 URL", "来源：", "来源:", "Source:", "source:")):
             for match in URL_RE.findall(line):
                 urls.append(normalize_url(match))
     return list(dict.fromkeys(urls))
@@ -355,7 +401,18 @@ def read_note(vault: Path, path: Path, protected: set[str]) -> Note:
     title = frontmatter.get("title") or heading_title(body) or path.stem
     links = [wikilink_target(raw) for raw in WIKILINK_RE.findall(text)]
     computed_fingerprint = content_fingerprint(text)
-    stored_fingerprint = frontmatter.get("content_fingerprint")
+    stored_fingerprint_field = None
+    stored_fingerprint = None
+    for field_name in ("source_fingerprint", "content_fingerprint"):
+        if frontmatter.get(field_name):
+            stored_fingerprint_field = field_name
+            stored_fingerprint = frontmatter[field_name]
+            break
+    fingerprint_valid = (
+        not stored_fingerprint
+        or stored_fingerprint_field == "content_fingerprint"
+        or stored_fingerprint == computed_fingerprint
+    )
     urls = extract_urls(frontmatter, text)
     return Note(
         path=rel,
@@ -367,10 +424,11 @@ def read_note(vault: Path, path: Path, protected: set[str]) -> Note:
         normalized_urls=urls,
         fingerprint=computed_fingerprint,
         stored_fingerprint=stored_fingerprint,
-        fingerprint_valid=not stored_fingerprint or stored_fingerprint == computed_fingerprint,
+        stored_fingerprint_field=stored_fingerprint_field,
+        fingerprint_valid=fingerprint_valid,
         invalid_frontmatter=find_invalid_frontmatter(text),
         content_length=len(normalize_body_for_hash(text)),
-        has_summary="## Summary" in text or "## Abstract" in text or "## 提炼" in text or "## 摘要" in text,
+        has_summary="## 提炼" in text or "## 摘要" in text,
         outbound_count=len(links),
         protected=is_protected(rel, protected),
     )
@@ -415,7 +473,7 @@ def duplicate_groups(notes: list[Note]) -> list[dict]:
         for url in note.normalized_urls:
             candidates[("url", url)].append(note)
         if note.fingerprint and note.fingerprint_valid:
-            candidates[("fingerprint", note.fingerprint)].append(note)
+            candidates[("source_fingerprint", note.fingerprint)].append(note)
         source_file = note.frontmatter.get("source_file")
         if source_file:
             source_file_candidates[source_file].append(note)
@@ -510,6 +568,14 @@ def clean_source_ref(value: str) -> str:
     return wikilink_target(value)
 
 
+def source_marker_tail(line: str) -> str | None:
+    for marker in ("原始文件", "Original file"):
+        if marker in line:
+            _head, _sep, tail = line.partition(marker)
+            return tail.lstrip("：:").strip()
+    return None
+
+
 def source_refs_from_text(note: Note) -> list[dict]:
     text = note.abs_path.read_text(encoding="utf-8")
     refs: list[dict] = []
@@ -517,7 +583,8 @@ def source_refs_from_text(note: Note) -> list[dict]:
     if source_file:
         refs.append({"kind": "frontmatter", "ref": clean_source_ref(source_file)})
     for line in text.splitlines():
-        if "Original file" not in line and "原始文件" not in line:
+        tail = source_marker_tail(line)
+        if tail is None:
             continue
         wikilinks = WIKILINK_RE.findall(line)
         if wikilinks:
@@ -527,11 +594,6 @@ def source_refs_from_text(note: Note) -> list[dict]:
         if backtick:
             refs.append({"kind": "body", "ref": clean_source_ref(backtick.group(1))})
             continue
-        if "Original file" in line:
-            _, _, tail = line.partition("Original file")
-        else:
-            _, _, tail = line.partition("原始文件")
-        tail = tail.lstrip("：:").strip()
         if tail:
             refs.append({"kind": "body", "ref": clean_source_ref(tail)})
     return refs
@@ -576,7 +638,7 @@ def canonical_source_ref(note_path: str, source_rel: str) -> str:
 def infer_note_for_source(source_rel: str, notes_by_path: dict[str, Note]) -> Note | None:
     source_path = Path(source_rel)
     parent = source_path.parent
-    note_dir = parent.parent if parent.name.lower() in {"source", "sources"} else parent
+    note_dir = parent.parent if parent.name.lower() == "source" or parent.name.lower() == "sources" else parent
     candidate = (note_dir / f"{source_path.stem}.md").as_posix()
     return notes_by_path.get(candidate)
 
@@ -650,7 +712,10 @@ def source_file_anomalies(vault: Path, scopes: list[str], notes: list[Note], pro
             continue
         expected = expected_source_rel(note.path, source_rel)
         canonical_ref = canonical_source_ref(note.path, source_rel)
-        status, reason = source_policy_status(vault, note, source_rel, expected, protected)
+        if source_rel == expected:
+            status, reason = source_policy_status(vault, note, source_rel, expected, protected)
+        else:
+            status, reason = source_policy_status(vault, note, source_rel, expected, protected)
         findings.append({
             "note": note.path,
             "actual": source_rel,
@@ -747,8 +812,8 @@ def metadata_missing(notes: list[Note]) -> list[dict]:
         if not (note.path.startswith("Resources/") or note.path.startswith("Archive/")):
             continue
         fields: list[str] = []
-        if not note.frontmatter.get("content_fingerprint"):
-            fields.append("content_fingerprint")
+        if not (note.frontmatter.get("source_fingerprint") or note.frontmatter.get("content_fingerprint")):
+            fields.append("source_fingerprint")
         if note.normalized_urls and not note.frontmatter.get("source_url"):
             fields.append("source_url")
         if fields:
@@ -760,10 +825,161 @@ def orphan_notes(notes: list[Note]) -> list[str]:
     return sorted(note.path for note in notes if note.inbound_count == 0 and note.outbound_count == 0 and note.path.startswith("Resources/"))
 
 
+def resource_topic_dirs(vault: Path, scopes: list[str]) -> list[Path]:
+    topics: set[Path] = set()
+    resources = vault / "Resources"
+    for scope in scopes:
+        rel = Path(scope)
+        parts = rel.parts
+        if not parts or parts[0] != "Resources":
+            continue
+        if len(parts) == 1:
+            if resources.is_dir():
+                topics.update(path for path in resources.iterdir() if path.is_dir())
+            continue
+        topic = resources / parts[1]
+        if topic.is_dir():
+            topics.add(topic)
+    return sorted(topics)
+
+
+def resource_index_items(topic_dir: Path) -> list[dict]:
+    items: list[dict] = []
+    for md in sorted(topic_dir.glob("*.md")):
+        if md.name.lower() == "readme.md":
+            continue
+        try:
+            text = md.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        frontmatter, _aliases, _body = parse_frontmatter(text)
+        if frontmatter.get("type", "reference").strip() not in ("reference", ""):
+            continue
+        title = strip_quotes(frontmatter.get("title", "")).strip() or md.stem
+        created = frontmatter.get("created", "").strip()
+        source = strip_quotes(
+            frontmatter.get("source_url", "") or frontmatter.get("source_file", "") or frontmatter.get("source", "")
+        ).strip()
+        items.append({"title": title, "file": md.name, "created": created, "source": source})
+    items.sort(key=lambda item: item["file"])
+    items.sort(key=lambda item: item["created"], reverse=True)
+    return items
+
+
+def render_resource_index(items: list[dict]) -> str:
+    if not items:
+        return f"{RESOURCE_INDEX_BEGIN}\n\n> 暂无 reference 类资料。\n\n{RESOURCE_INDEX_END}"
+    lines = [RESOURCE_INDEX_BEGIN, ""]
+    for item in items:
+        link = f"[[{item['file'][:-3]}]]"
+        created = item["created"] or "—"
+        if item["source"]:
+            lines.append(f"- {link}（{created}）— {item['source']}")
+        else:
+            lines.append(f"- {link}（{created}）")
+    lines.append("")
+    lines.append(RESOURCE_INDEX_END)
+    return "\n".join(lines)
+
+
+def resource_index_span(text: str) -> tuple[int, int] | None:
+    begin = text.find(RESOURCE_INDEX_BEGIN)
+    if begin == -1:
+        return None
+    end = text.find(RESOURCE_INDEX_END, begin)
+    if end == -1:
+        return None
+    return begin, end + len(RESOURCE_INDEX_END)
+
+
+def render_topic_readme(topic: str, expected_index: str) -> str:
+    return (
+        "---\n"
+        f"title: {quote_yaml(topic)}\n"
+        "type: index\n"
+        "---\n\n"
+        f"# {topic}\n\n"
+        "## 主题定位\n\n"
+        "待补充：说明本主题的定位、承接 Area / Project，以及资料使用边界。\n\n"
+        "## 资料索引\n\n"
+        f"{expected_index}\n"
+    )
+
+
+def upsert_resource_index_section(text: str, expected_index: str) -> str:
+    span = resource_index_span(text)
+    if span is not None:
+        return text[: span[0]] + expected_index + text[span[1] :]
+
+    trailing_newline = text.endswith("\n")
+    lines = text[:-1].split("\n") if trailing_newline else text.split("\n")
+    index_heading = next((idx for idx, line in enumerate(lines) if line.strip() == "## 资料索引"), None)
+    if index_heading is None:
+        base = text.rstrip()
+        return base + "\n\n## 资料索引\n\n" + expected_index + "\n"
+
+    next_heading = len(lines)
+    for idx in range(index_heading + 1, len(lines)):
+        if lines[idx].startswith("## ") and lines[idx].strip() != "## 资料索引":
+            next_heading = idx
+            break
+    output = lines[: index_heading + 1] + ["", expected_index]
+    if next_heading < len(lines):
+        output.extend(["", *lines[next_heading:]])
+    return "\n".join(output) + ("\n" if trailing_newline else "")
+
+
+def topic_index_gaps(vault: Path, scopes: list[str], protected: set[str]) -> list[dict]:
+    gaps: list[dict] = []
+    for topic_dir in resource_topic_dirs(vault, scopes):
+        items = resource_index_items(topic_dir)
+        readme = topic_dir / "README.md"
+        topic_rel = topic_dir.relative_to(vault).as_posix()
+        readme_rel = readme.relative_to(vault).as_posix()
+        if len(items) < 3 and not readme.exists():
+            continue
+        expected_index = render_resource_index(items)
+        status: str | None = None
+        reason = ""
+        current_index = ""
+        if not readme.exists():
+            status = "missing_readme"
+            reason = "topic has 3+ reference notes but no README / Map of Content"
+        else:
+            text = readme.read_text(encoding="utf-8", errors="replace")
+            span = resource_index_span(text)
+            if span is None:
+                status = "missing_markers"
+                reason = "README exists but has no resource-index marker block"
+            else:
+                current_index = text[span[0] : span[1]]
+                if current_index != expected_index:
+                    status = "stale"
+                    reason = "README resource-index marker block differs from current reference notes"
+        if status is None:
+            continue
+        protected_item = is_protected(topic_rel + "/", protected) or is_protected(readme_rel, protected)
+        gaps.append(
+            {
+                "topic": topic_dir.name,
+                "topic_dir": topic_rel,
+                "readme": readme_rel,
+                "reference_count": len(items),
+                "status": "protected" if protected_item else status,
+                "reason": "topic README or directory has pre-existing uncommitted changes" if protected_item else reason,
+                "expected_index": expected_index,
+                "current_index": current_index,
+                "fixable": not protected_item,
+            }
+        )
+    return sorted(gaps, key=lambda item: (item["topic_dir"], item["status"]))
+
+
 def invalid_fingerprints(notes: list[Note]) -> list[dict]:
     return [
         {
             "path": note.path,
+            "field": note.stored_fingerprint_field,
             "stored": note.stored_fingerprint,
             "computed": note.fingerprint,
             "reason": "stale_or_invalid_fingerprint",
@@ -791,6 +1007,9 @@ def coverage(notes: list[Note]) -> dict:
         "markdown_count": len(notes),
         "distribution": dict(sorted(distribution.items())),
         "source_url_or_canonical": sum(1 for note in notes if note.normalized_urls),
+        "source_fingerprint": sum(
+            1 for note in notes if note.frontmatter.get("source_fingerprint") or note.frontmatter.get("content_fingerprint")
+        ),
         "content_fingerprint": sum(1 for note in notes if note.frontmatter.get("content_fingerprint")),
         "invalid_fingerprint": sum(1 for note in notes if not note.fingerprint_valid),
         "invalid_frontmatter": sum(1 for note in notes if note.invalid_frontmatter),
@@ -844,7 +1063,7 @@ def insert_frontmatter_fields(text: str, fields: dict[str, str]) -> str:
                         end = j
                         break
                 break
-            if line.strip() and not is_organize_marker(line):
+            if line.strip() and not line.startswith("> 整理自 Inbox"):
                 break  # Non-preamble, non-fence content → no frontmatter at top.
 
     # If still not found, search deeper for any frontmatter block.
@@ -873,17 +1092,17 @@ def insert_frontmatter_fields(text: str, fields: dict[str, str]) -> str:
 
 
 def add_duplicate_marker(text: str, canonical_title: str, evidence: list[dict], date: str) -> str:
-    if "Duplicate content, canonical" in text:
+    if "重复内容，canonical" in text:
         return text
     evidence_text = ", ".join(f"{item['type']}={item['value']}" for item in evidence)
-    marker = f"> Duplicate content, canonical: [[{canonical_title}]]\n> Duplication evidence: {evidence_text}\n> Optimization date: {date}\n\n"
+    marker = f"> 重复内容，canonical：[[{canonical_title}]]\n> 重复依据：{evidence_text}\n> 优化日期：{date}\n\n"
     return marker + text
 
 
 def append_canonical_record(text: str, duplicate_title: str) -> str:
-    if duplicate_title in text and "Duplicate archive" in text:
+    if duplicate_title in text and "重复" in text:
         return text
-    return text.rstrip() + f"\n\n## Duplicate archive\n\n- [[{duplicate_title}]]: archived as duplicate content.\n"
+    return text.rstrip() + f"\n\n## 重复归档\n\n- [[{duplicate_title}]]：已归档为重复内容。\n"
 
 
 def replace_wikilink(text: str, old: str, new: str) -> str:
@@ -920,27 +1139,31 @@ def upsert_source_file_frontmatter(text: str, canonical_ref: str) -> str:
     return "\n".join(lines) + ("\n" if trailing_newline else "")
 
 
-def strip_inline_original_file(marker: str) -> str:
-    for token in (" Original file", "。Original file", "。原始文件", " 原始文件"):
-        if token in marker:
-            marker = marker.split(token, 1)[0]
-    return marker.rstrip("。 ")
-
-
 def normalize_original_file_line(text: str, canonical_ref: str) -> str:
     trailing_newline = text.endswith("\n")
     lines = text[:-1].split("\n") if trailing_newline else text.split("\n")
     output: list[str] = []
     replaced = False
+    use_english = "Original file" in text and "原始文件" not in text
+    original_line = (
+        f"Original file: [[{canonical_ref}]]"
+        if use_english
+        else f"原始文件：[[{canonical_ref}]]"
+    )
     for line in lines:
-        if is_organize_marker(line):
-            output.append(strip_inline_original_file(line))
-            output.append(f"Original file: [[{canonical_ref}]]")
+        if line.startswith("> 整理自 Inbox") or line.startswith("> Organized from Inbox"):
+            marker = line
+            for original_marker in ("原始文件", "Original file"):
+                if original_marker in marker:
+                    marker = marker.split(original_marker, 1)[0].rstrip(" .。:：")
+                    break
+            output.append(marker)
+            output.append(original_line)
             replaced = True
             continue
-        if "Original file" in line or "原始文件" in line:
+        if "原始文件" in line or "Original file" in line:
             if not replaced:
-                output.append(f"Original file: [[{canonical_ref}]]")
+                output.append(original_line)
                 replaced = True
             continue
         output.append(line)
@@ -951,7 +1174,7 @@ def normalize_original_file_line(text: str, canonical_ref: str) -> str:
                 if output[idx].strip() == "---":
                     insert_at = idx + 1
                     break
-        output.insert(insert_at, f"Original file: [[{canonical_ref}]]")
+        output.insert(insert_at, original_line)
     return "\n".join(output) + ("\n" if trailing_newline else "")
 
 
@@ -1001,6 +1224,8 @@ def apply_metadata(notes: list[Note], report: dict) -> None:
             continue
         text = note.abs_path.read_text(encoding="utf-8")
         fields: dict[str, str] = {}
+        if "source_fingerprint" in item["fields"]:
+            fields["source_fingerprint"] = content_fingerprint(text)
         if "content_fingerprint" in item["fields"]:
             fields["content_fingerprint"] = content_fingerprint(text)
         if "source_url" in item["fields"] and note.normalized_urls:
@@ -1009,6 +1234,32 @@ def apply_metadata(notes: list[Note], report: dict) -> None:
         if new_text != text:
             note.abs_path.write_text(new_text, encoding="utf-8")
             report["applied"]["metadata"].append({"path": note.path, "fields": sorted(fields)})
+
+
+def apply_topic_indexes(vault: Path, report: dict) -> None:
+    applied = report["applied"].setdefault("topic_indexes", [])
+    for item in report.get("topic_index_gaps", []):
+        status = item.get("status")
+        if not item.get("fixable"):
+            report["skipped_uncertain"].append({"type": "topic_index_gap", **item})
+            continue
+        readme_rel = item["readme"]
+        readme_path = vault / readme_rel
+        expected_index = item["expected_index"]
+        if status == "missing_readme":
+            readme_path.parent.mkdir(parents=True, exist_ok=True)
+            readme_path.write_text(render_topic_readme(item["topic"], expected_index), encoding="utf-8")
+            applied_status = "created"
+        elif status in {"missing_markers", "stale"}:
+            text = readme_path.read_text(encoding="utf-8")
+            new_text = upsert_resource_index_section(text, expected_index)
+            if new_text != text:
+                readme_path.write_text(new_text, encoding="utf-8")
+            applied_status = "inserted_markers" if status == "missing_markers" else "updated"
+        else:
+            continue
+        item["applied_status"] = applied_status
+        applied.append({"topic_dir": item["topic_dir"], "readme": readme_rel, "status": applied_status})
 
 
 def apply_duplicates(vault: Path, notes: list[Note], report: dict, date: str) -> None:
@@ -1123,17 +1374,18 @@ def append_log(vault: Path, report: dict, date: str) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     entry = (
         f"## {date} manual\n"
-        f"- Scope: {', '.join(report['scope'])}\n"
-        f"- Exact duplicates: {len(report['duplicates'])}\n"
-        f"- Suspected duplicates: 0\n"
-        f"- Link additions: 0\n"
-        f"- Broken links fixed: {len(report['applied']['broken_links'])}\n"
-        f"- Empty stubs cleaned: {len(report['applied']['empty_stubs'])}\n"
-        f"- Metadata backfilled: {len(report['applied']['metadata'])}\n"
-        f"- Source files normalized: {len(report['applied'].get('source_files', []))}\n"
-        f"- Invalid frontmatter values: {len(report.get('invalid_frontmatter', []))}\n"
-        f"- Structure suggestions: {len(report['orphan_notes'])}\n"
-        "commit: none\n"
+        f"- 范围：{', '.join(report['scope'])}\n"
+        f"- 完全重复：{len(report['duplicates'])}\n"
+        f"- 疑似重复：0\n"
+        f"- 补链：0\n"
+        f"- 修复失效链接：{len(report['applied']['broken_links'])}\n"
+        f"- 清理空残骸：{len(report['applied']['empty_stubs'])}\n"
+        f"- 元数据补全：{len(report['applied']['metadata'])}\n"
+        f"- 原文附件规范化：{len(report['applied'].get('source_files', []))}\n"
+        f"- frontmatter 值非法：{len(report.get('invalid_frontmatter', []))}\n"
+        f"- 结构建议：{len(report['orphan_notes']) + len(report.get('topic_index_gaps', []))}\n"
+        f"- 主题索引：{len(report['applied'].get('topic_indexes', []))}\n"
+        "commit: 无\n"
     )
     old = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
     log_path.write_text(old + ("\n" if old and not old.endswith("\n") else "") + entry, encoding="utf-8")
@@ -1143,6 +1395,7 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
     protected = protected_paths(vault)
     notes, by_name, file_stems, attachment_targets = build_index(vault, scopes, protected)
     empty_stub_findings = empty_stubs(vault, notes, by_name)
+    topic_index_findings = topic_index_gaps(vault, scopes, protected)
     report = {
         "scope": scopes,
         "coverage": coverage(notes),
@@ -1153,10 +1406,23 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
         "source_file_anomalies": source_file_anomalies(vault, scopes, notes, protected),
         "metadata_missing": metadata_missing(notes),
         "orphan_notes": orphan_notes(notes),
+        "topic_index_gaps": topic_index_findings,
         "invalid_fingerprints": invalid_fingerprints(notes),
         "invalid_frontmatter": invalid_frontmatter_list(notes),
-        "applied": {"duplicates": [], "metadata": [], "broken_links": [], "empty_stubs": [], "source_files": []},
-        "report_only": {"suspected_duplicates": [], "structure_suggestions": [], "unmatched_source_files": []},
+        "applied": {
+            "duplicates": [],
+            "metadata": [],
+            "broken_links": [],
+            "empty_stubs": [],
+            "source_files": [],
+            "topic_indexes": [],
+        },
+        "report_only": {
+            "suspected_duplicates": [],
+            "structure_suggestions": [],
+            "unmatched_source_files": [],
+            "topic_index_gaps": topic_index_findings,
+        },
         "skipped_uncertain": [],
         "verification": {},
     }
@@ -1175,17 +1441,17 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
 
 def summarize_items(items: list, formatter, limit: int = 8) -> str:
     if not items:
-        return "none"
+        return "无"
     rendered = [formatter(item) for item in items[:limit]]
     extra = len(items) - limit
-    suffix = f"; {extra} more" if extra > 0 else ""
-    return "; ".join(rendered) + suffix
+    suffix = f"；另有 {extra} 项" if extra > 0 else ""
+    return "；".join(rendered) + suffix
 
 
 def markdown_report(report: dict) -> str:
     coverage_data = report["coverage"]
     duplicate_lines = [
-        f"- canonical `{item['canonical']}`; duplicates: {', '.join('`' + p + '`' for p in item['duplicates'])}"
+        f"- canonical `{item['canonical']}`；duplicates: {', '.join('`' + p + '`' for p in item['duplicates'])}"
         for item in report["duplicates"]
     ]
     suspected = report["report_only"].get("suspected_duplicates", [])
@@ -1195,7 +1461,7 @@ def markdown_report(report: dict) -> str:
     evidence_items = [item for item in skipped if item.get("type") not in {"ambiguous_broken_link"} and not item.get("type", "").startswith("protected_")]
     uncertain_summary = summarize_items(
         uncertain_items,
-        lambda item: f"`[[{item.get('link')}]]` in `{item.get('source')}` has no unique match",
+        lambda item: f"`{item.get('source')}` 中 `[[{item.get('link')}]]` 无唯一匹配",
     )
     evidence_summary = summarize_items(
         [*protected_items, *evidence_items],
@@ -1203,59 +1469,70 @@ def markdown_report(report: dict) -> str:
     )
     invalid_count = len(report.get("invalid_fingerprints", []))
     invalid_fm_count = len(report.get("invalid_frontmatter", []))
-    invalid_fm_lines = [
-        f"- `{item['path']}`: {item['detail']}"
-        for item in report.get("invalid_frontmatter", [])
-    ]
     empty_stub_lines = [
-        f"- `{item['stub']}` -> suggested target `{item['suggested_target']}` (referenced by: {', '.join('`' + r['source'] + '`' for r in item['references'])})"
+        f"- `{item['stub']}` → 建议目标 `{item['suggested_target']}`（引用源：{', '.join('`' + r['source'] + '`' for r in item['references'])}）"
         for item in report.get("empty_stubs", [])
         if item["status"] == "fixable"
     ]
     unfixable_stub_lines = [
-        f"- `{item['stub']}` ({item['status']})"
+        f"- `{item['stub']}`（{item['status']}）"
         for item in report.get("empty_stubs", [])
         if item["status"] != "fixable"
     ]
+    invalid_fm_lines = [
+        f"- `{item['path']}`：{item['detail']}"
+        for item in report.get("invalid_frontmatter", [])
+    ]
     source_fix_lines = [
-        f"- `{item['old']}` -> `{item['new']}`; note `{item['note']}`"
+        f"- `{item['old']}` → `{item['new']}`；note `{item['note']}`"
         for item in report["applied"].get("source_files", [])
     ]
+    topic_index_applied_lines = [
+        f"- `{item['topic_dir']}` → `{item['readme']}`（{item['status']}）"
+        for item in report["applied"].get("topic_indexes", [])
+    ]
     source_pending_lines = [
-        f"- `{item.get('actual')}` ({item.get('status')}): {item.get('reason')}"
+        f"- `{item.get('actual')}`（{item.get('status')}）：{item.get('reason')}"
         for item in report.get("source_file_anomalies", [])
         if item.get("status") != "fixable"
     ]
+    topic_index_lines = [
+        f"- `{item['topic_dir']}`：{item['status']}，{item['reference_count']} 篇 reference，目标 `{item['readme']}`"
+        for item in report.get("topic_index_gaps", [])
+        if not item.get("applied_status")
+    ]
     lines = [
-        "## Scope and scan results",
-        f"- Scope: {', '.join(report['scope'])}",
-        f"- Scan: {coverage_data['markdown_count']} Markdown notes; directory distribution {coverage_data['distribution']}; source URL coverage {coverage_data['source_url_or_canonical']}; fingerprint coverage {coverage_data['content_fingerprint']}; fingerprint mismatches {invalid_count}; invalid frontmatter values {invalid_fm_count}",
+        "## 范围与扫描结果",
+        f"- 范围：{', '.join(report['scope'])}",
+        f"- 扫描：{coverage_data['markdown_count']} 篇 Markdown；目录分布 {coverage_data['distribution']}；来源 URL 覆盖 {coverage_data['source_url_or_canonical']}；源指纹覆盖 {coverage_data['source_fingerprint']}；指纹不一致 {invalid_count}；frontmatter 值非法 {invalid_fm_count}",
         "",
-        "## Auto-processed",
-        f"- Duplicate archival: {len(report['applied']['duplicates']) or 'none'}",
-        f"- Link additions: none (semantic link additions are only suggested by the model based on the script report)",
-        f"- Metadata backfill: {len(report['applied']['metadata']) or 'none'}",
-        "- Source file normalization: " + ("\n" + "\n".join(source_fix_lines) if source_fix_lines else "none"),
-        f"- Broken links fixed: {len(report['applied']['broken_links']) or 'none'}",
-        "- Empty stubs cleanup: " + ("\n" + "\n".join(empty_stub_lines) if empty_stub_lines else "none"),
+        "## 已自动处理",
+        f"- 重复归档：{len(report['applied']['duplicates']) or '无'}",
+        f"- 补链：无（语义补链仅由模型基于脚本报告建议处理）",
+        f"- 元数据补全：{len(report['applied']['metadata']) or '无'}",
+        "- 原文附件规范化：" + ("\n" + "\n".join(source_fix_lines) if source_fix_lines else "无"),
+        f"- 失效链接修复：{len(report['applied']['broken_links']) or '无'}",
+        "- 空残骸清理：" + ("\n" + "\n".join(empty_stub_lines) if empty_stub_lines else "无"),
+        "- 主题索引：" + ("\n" + "\n".join(topic_index_applied_lines) if topic_index_applied_lines else "无"),
         "",
-        "## Report only, not auto-processed",
-        "- Exact duplicate candidates: " + ("; ".join(duplicate_lines) if duplicate_lines else "none"),
-        f"- Suspected duplicates: {len(suspected) if suspected else 'none'}",
-        f"- Orphan notes: {len(report['orphan_notes']) if report['orphan_notes'] else 'none'}",
-        "- Source file anomalies: " + ("\n" + "\n".join(source_pending_lines) if source_pending_lines else "none"),
-        "- Invalid frontmatter values (Obsidian properties break; quote any value containing `: `): " + ("\n" + "\n".join(invalid_fm_lines) if invalid_fm_lines else "none"),
+        "## 只报告，未自动处理",
+        "- 完全重复候选：" + ("；".join(duplicate_lines) if duplicate_lines else "无"),
+        f"- 疑似重复：{len(suspected) if suspected else '无'}",
+        f"- 孤岛笔记：{len(report['orphan_notes']) if report['orphan_notes'] else '无'}",
+        "- 新建 / 更新主题索引：" + ("\n" + "\n".join(topic_index_lines) if topic_index_lines else "无"),
+        "- 原文附件异常：" + ("\n" + "\n".join(source_pending_lines) if source_pending_lines else "无"),
+        "- frontmatter 值非法（Obsidian 属性会失效，需给含 `: ` 的 value 加引号）：" + ("\n" + "\n".join(invalid_fm_lines) if invalid_fm_lines else "无"),
         "",
-        "## Skipped / uncertain",
-        "- protected paths: " + (", ".join(f"`{p}`" for p in report["protected_paths"]) if report["protected_paths"] else "none"),
-        "- Uncertain matches: " + uncertain_summary,
-        "- Insufficient evidence: " + evidence_summary,
-        "- Unfixable empty stubs: " + ("\n" + "\n".join(unfixable_stub_lines) if unfixable_stub_lines else "none"),
+        "## 跳过 / 不确定",
+        "- protected paths：" + (", ".join(f"`{p}`" for p in report["protected_paths"]) if report["protected_paths"] else "无"),
+        "- 不确定匹配：" + uncertain_summary,
+        "- 证据不足：" + evidence_summary,
+        "- 无法修复的空残骸：" + ("\n" + "\n".join(unfixable_stub_lines) if unfixable_stub_lines else "无"),
         "",
-        "## Verification results",
-        f"- git status: {report['verification'].get('git_status', 'not checked')}",
-        f"- self-check: {report['verification'].get('self_check', 'not checked')}",
-        "- commit: none",
+        "## 验证结果",
+        f"- git status：{report['verification'].get('git_status', '未检查')}",
+        f"- 自检：{report['verification'].get('self_check', '未检查')}",
+        "- commit：无",
         "",
     ]
     return "\n".join(lines)
@@ -1280,13 +1557,22 @@ def safe_self_check(vault: Path, report: dict) -> None:
         if not (vault / item["new"]).exists():
             source_missing = True
             break
-    report["verification"]["self_check"] = "passed" if not bad_delete and not duplicate_missing and not stub_not_deleted and not source_missing else "failed"
+    topic_index_missing = False
+    for item in report["applied"].get("topic_indexes", []):
+        if not (vault / item["readme"]).exists():
+            topic_index_missing = True
+            break
+    report["verification"]["self_check"] = (
+        "通过"
+        if not bad_delete and not duplicate_missing and not stub_not_deleted and not source_missing and not topic_index_missing
+        else "未通过"
+    )
 
 
 def checked_report_path(raw: str, expected: Path, label: str) -> Path:
     out = Path(raw).resolve()
     if out != expected:
-        raise ValueError(f"{label} report path must be {expected}")
+        raise ValueError(f"{label} report path must be /tmp/{expected.name}")
     if out.exists() and out.is_symlink():
         raise ValueError(f"{label} report path must not be a symlink")
     return out
@@ -1294,7 +1580,7 @@ def checked_report_path(raw: str, expected: Path, label: str) -> Path:
 
 def write_report_file(path: Path, content: str) -> None:
     if path.parent != FIXED_REPORT_DIR:
-        raise ValueError(f"report parent must be {FIXED_REPORT_DIR}")
+        raise ValueError("report parent must be /tmp")
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
@@ -1345,10 +1631,11 @@ def main(argv: list[str]) -> int:
     if args.mode == "apply-safe":
         protected = set(report["protected_paths"])
         notes, _by_name, _file_stems, _attachment_targets = build_index(vault, scopes, protected)
-        date = args.date or "undated"
+        date = args.date or "未注明日期"
         apply_source_file_policy(vault, report)
         notes, _by_name, _file_stems, _attachment_targets = build_index(vault, scopes, protected)
         apply_metadata(notes, report)
+        apply_topic_indexes(vault, report)
         notes, _by_name, _file_stems, _attachment_targets = build_index(vault, scopes, protected)
         apply_duplicates(vault, notes, report, date)
         notes, _by_name, _file_stems, _attachment_targets = build_index(vault, scopes, protected)
@@ -1358,8 +1645,8 @@ def main(argv: list[str]) -> int:
             append_log(vault, report, date)
         safe_self_check(vault, report)
     else:
-        report["verification"]["git_status"] = "scan mode, no changes"
-        report["verification"]["self_check"] = "passed"
+        report["verification"]["git_status"] = "scan 模式未修改"
+        report["verification"]["self_check"] = "通过"
 
     try:
         write_outputs(report, json_path, markdown_path)

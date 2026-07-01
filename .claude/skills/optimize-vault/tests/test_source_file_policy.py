@@ -22,7 +22,25 @@ class SourceFilePolicyTest(unittest.TestCase):
 title: Paper
 ---
 
-> Organized from Inbox, 2026-07-01
+> 整理自 Inbox，2026-07-01
+
+# Paper
+
+原始文件：[[Paper.pdf]]
+"""
+
+        result = optimize_vault.normalize_source_note_text(text, "source/Paper.pdf")
+
+        self.assertEqual(1, result.count("原始文件：[[source/Paper.pdf]]"))
+        self.assertNotIn("原始文件：[[Paper.pdf]]", result)
+        self.assertIn("> 整理自 Inbox，2026-07-01\n原始文件：[[source/Paper.pdf]]", result)
+
+    def test_normalize_source_note_text_preserves_english_original_file_label(self) -> None:
+        text = """---
+title: Paper
+---
+
+> Organized from Inbox, 2026-07-01. Original file: Paper.pdf.
 
 # Paper
 
@@ -41,9 +59,9 @@ title: Paper
 source_file: Paper.pdf
 ---
 
-> Organized from Inbox, 2026-07-01. Original file: Paper.pdf.
+> 整理自 Inbox，2026-07-01。原始文件：Paper.pdf。
 
-## Original
+## 原文
 
 page one\fpage two
 """
@@ -66,8 +84,8 @@ type: reference
 source_file: source/Paper.pdf
 ---
 
-> Organized from Inbox, 2026-07-01
-Original file: [[source/Paper.pdf]]
+> 整理自 Inbox，2026-07-01
+原始文件：[[source/Paper.pdf]]
 
 # Paper
 """,
@@ -85,12 +103,41 @@ Original file: [[source/Paper.pdf]]
             topic = vault / "Resources" / "Data Semantic Layer"
             old_source = topic / "Sources"
             old_source.mkdir(parents=True)
+            (old_source / "NoETL Whitepaper.pdf").write_bytes(b"%PDF demo\n")
+            (topic / "NoETL to Trusted AI 白皮书.md").write_text(
+                """---
+title: NoETL to Trusted AI 白皮书
+type: reference
+source_file: Sources/NoETL Whitepaper.pdf
+---
+
+> 整理自 Inbox，2026-07-01
+原始文件：[[Sources/NoETL Whitepaper.pdf]]
+
+# NoETL to Trusted AI 白皮书
+""",
+                encoding="utf-8",
+            )
+
+            report = optimize_vault.build_report(vault, ["Resources"])
+
+        self.assertEqual(1, len(report["source_file_anomalies"]))
+        finding = report["source_file_anomalies"][0]
+        self.assertEqual("Resources/Data Semantic Layer/Sources/NoETL Whitepaper.pdf", finding["actual"])
+        self.assertEqual("Resources/Data Semantic Layer/source/NoETL to Trusted AI 白皮书.pdf", finding["expected"])
+        self.assertEqual("fixable", finding["status"])
+
+    def test_english_original_file_line_reports_source_file_anomaly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            topic = vault / "Resources" / "Data Semantic Layer"
+            old_source = topic / "Sources"
+            old_source.mkdir(parents=True)
             (old_source / "Research Whitepaper.pdf").write_bytes(b"%PDF demo\n")
             (topic / "Trusted AI Research Whitepaper.md").write_text(
                 """---
 title: Trusted AI Research Whitepaper
 type: reference
-source_file: Sources/Research Whitepaper.pdf
 ---
 
 > Organized from Inbox, 2026-07-01

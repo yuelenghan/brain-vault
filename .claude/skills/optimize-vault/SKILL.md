@@ -26,30 +26,28 @@ Prefer letting the script handle scanning, indexing, exact deduplication, broken
 Analysis mode (read-only):
 
 ```bash
-<python> .claude/skills/optimize-vault/scripts/optimize_vault.py \
+python3 .claude/skills/optimize-vault/scripts/optimize_vault.py \
   --mode scan \
-  --json <os-temp-dir>/optimize-vault.json \
-  --markdown <os-temp-dir>/optimize-vault.md
+  --json /tmp/optimize-vault.json \
+  --markdown /tmp/optimize-vault.md
 ```
 
 Safe-apply mode (deterministic low-risk changes only):
 
 ```bash
-<python> .claude/skills/optimize-vault/scripts/optimize_vault.py \
+python3 .claude/skills/optimize-vault/scripts/optimize_vault.py \
   --mode apply-safe \
-  --json <os-temp-dir>/optimize-vault.json \
-  --markdown <os-temp-dir>/optimize-vault.md \
+  --json /tmp/optimize-vault.json \
+  --markdown /tmp/optimize-vault.md \
   --date <YYYY-MM-DD>
 ```
-
-Use the platform's Python launcher for `<python>`: usually `python3` on macOS / Linux, and `py -3` or `python` on Windows.
 
 - When the user says "only analyze / only report", use `--mode scan` only.
 - When the user says "optimize vault" and has not forbidden changes, you must prefer `--mode apply-safe`; the script does deterministic low-risk changes first.
 - When the user specifies a topic or directory, append one or more `--scope <directory>` to the script.
-- The script's JSON / Markdown output is fixed to the current OS temp directory as `optimize-vault.json` and `optimize-vault.md`; do not pass other report paths, do not pass `--vault`, and run from the vault root.
-- The script's JSON output is the primary source of truth; before the final answer you must Read the generated `optimize-vault.md` in the current OS temp directory or the JSON summary.
-- The script only trusts recomputed body fingerprints; if the report lists `invalid_fingerprints` / `stale_or_invalid_fingerprint`, do not auto-dedupe based on those stale frontmatter fingerprints — prefer to report or clean them manually.
+- The script's JSON / Markdown output is fixed to `/tmp/optimize-vault.json` and `/tmp/optimize-vault.md`; do not pass other report paths, do not pass `--vault`, and run from the vault root.
+- The script's JSON output is the primary source of truth; before the final answer you must Read `/tmp/optimize-vault.md` or the JSON summary.
+- The script only trusts recomputed source-material fingerprints; `source_fingerprint` is the preferred strict field, while legacy `content_fingerprint` is accepted for backward compatibility and is not treated as a strict stale/invalid signal. If the report lists `invalid_fingerprints` / `stale_or_invalid_fingerprint`, do not auto-dedupe based on those stale frontmatter fingerprints — prefer to report or clean them manually.
 - After running the script, continue checking the report for orphan notes, ownership gaps, topic-index gaps, and high-confidence semantic link additions; as long as they are non-protected, clearly-evidenced, and small, fix them directly and record — do not stop at "suggestion".
 - If `apply-safe` produces no changes but there are many protected paths, do not misread it as failure; explain the script skipped them to protect pre-existing uncommitted changes, and give the next step: commit/clean those changes and rerun, or narrow scope with `--scope <directory>`.
 - If the script errors, report the error first; do not fall back to large-scale model-driven edits to the library.
@@ -59,13 +57,15 @@ Use the platform's Python launcher for `<python>`: usually `python3` on macOS / 
 The script `.claude/skills/optimize-vault/scripts/optimize_vault.py` owns:
 
 - Scanning Markdown under `Projects/`, `Areas/`, `Resources/`, `Archive/`, ignoring `Inbox/`, workspace, and logs.
-- Parsing frontmatter, titles, aliases, `source_url` / `canonical_url` / `source_file` / `content_fingerprint`, `[[wikilinks]]`.
-- Normalizing URLs, computing missing content fingerprints, counting coverage and orphan notes.
-- Checking original source-file layout: non-Markdown originals referenced by `source_file`, `Original file: ...`, or `原始文件：...` must live in a lowercase `source/` directory next to the Markdown note, and the source filename stem must exactly match the Markdown filename stem while preserving the original extension.
-- Detecting exact duplicates: identical normalized URL, identical recomputed `content_fingerprint`, or identical `source_file` with matching body fingerprint; stale fingerprints in frontmatter are not used as an auto basis.
+- Parsing frontmatter, titles, aliases, `source_url` / `canonical_url` / `source_file` / `source_fingerprint` / legacy `content_fingerprint`, `[[wikilinks]]`.
+- Normalizing URLs, computing missing source fingerprints, counting coverage, orphan notes, and topic-index gaps.
+- Checking original source-file layout: non-Markdown originals referenced by `source_file` or `原始文件：...` must live in a lowercase `source/` directory next to the Markdown note, and the source filename stem must exactly match the Markdown filename stem while preserving the original extension.
+- Detecting exact duplicates: identical normalized URL, identical recomputed source fingerprint, or identical `source_file` with matching source fingerprint; stale fingerprints in frontmatter are not used as an auto basis.
 - Choosing canonical via heuristics: `Resources/` first, has distillation, more inbound links, more complete body, non-`Archive/Duplicates/` first.
 - Detecting broken links and empty stubs; auto-fixing only on a unique match, reporting on multiple candidates.
-- Under `apply-safe`: metadata backfill, strongly-evidenced source-file normalization via `git mv` plus note-reference repair, exact-duplicate `git mv` archival, unique broken-link repair, empty stub deletion, writing `.claude/optimize-vault.log`.
+- Under `apply-safe`: metadata backfill, exact-duplicate `git mv` archival, unique broken-link repair, empty stub deletion, writing `.claude/optimize-vault.log`.
+- Under `apply-safe`: topic-index creation/update for non-protected `Resources/<topic>/` directories with 3+ reference notes, including missing README creation, missing marker insertion, and stale marker block refresh.
+- Under `apply-safe`: strongly-evidenced source-file normalization via `git mv` plus note-reference repair, changing `source_file` and the visible `原始文件：[[...]]` line to `source/<Markdown stem>.<extension>`.
 - Generating a fixed-structure Markdown / JSON report, splitting `applied`, `report_only`, `skipped_uncertain`, `verification`.
 
 ### 3. Judgment still owned by the model
@@ -86,8 +86,8 @@ Classify by evidence strength:
 Meeting any of:
 
 - Identical normalized `source_url` / `canonical_url`
-- Identical recomputed body `content_fingerprint`
-- Same original `source_file` with matching body fingerprint
+- Identical recomputed source fingerprint (`source_fingerprint`; legacy `content_fingerprint` accepted)
+- Same original `source_file` with matching source fingerprint
 
 Handling:
 
@@ -120,13 +120,13 @@ As material grows, early notes may lack links to later-related ones. Add links i
 
 Beyond dedup and linking, check these low-risk optimizations:
 
-- **Source metadata coverage**: when a material note is missing `content_fingerprint`, add it; when it has a clear URL but no `source_url`, add `source_url`.
-- **Original source-file policy**: when a material note references a non-Markdown original through frontmatter `source_file`, visible `Original file: ...`, or visible `原始文件：...`, the original must be at `<note directory>/source/<Markdown filename stem><original extension>`. If the source is in the topic root, `Sources/`, another directory name, or has a different stem, and the referenced source file exists with no destination conflict, `apply-safe` may move it via `git mv` and update both `source_file` and `Original file: [[source/<stem>.<ext>]]`. If the source file has no unique Markdown note, the expected destination already exists, the path is protected, or the source reference is missing, report only.
+- **Source metadata coverage**: when a material note is missing both preferred `source_fingerprint` and legacy `content_fingerprint`, add `source_fingerprint`; when it has a clear URL but no `source_url`, add `source_url`. The source fingerprint is based on the original material view, not model-added `## 提炼`, relationship links, or generated resource-index blocks.
+- **Original source-file policy**: when a material note references a non-Markdown original through frontmatter `source_file` or visible `原始文件：...`, the original must be at `<note directory>/source/<Markdown filename stem><original extension>`. If the source is in the topic root, `Sources/`, another directory name, or has a different stem, and the referenced source file exists with no destination conflict, `apply-safe` may move it via `git mv` and update both `source_file` and `原始文件：[[source/<stem>.<ext>]]`. If the source file has no unique Markdown note, the expected destination already exists, the path is protected, or the source reference is missing, report only.
 - **Ownership-gate leftovers**: when `Resources/` / reusable `Archive/` lacks an Area / Project ownership, add a link and back-link if a suitable ownership exists; only report needing a new ownership when none is suitable.
-- **Topic-index gap**: when a `Resources/<topic>/` has 3+ notes but no topic README / Map of Content, and the directory and target file are non-protected, you may create a short topic README. The README's "资料索引" section is wrapped between two markers `<!-- BEGIN: resource-index -->` / `<!-- END: resource-index -->`, then run `<python> .claude/skills/optimize-vault/scripts/generate_resource_index.py --dir "Resources/<topic>"` to fill it; outside the marker block, write topic positioning, ownership, and hand-written notes. Only report when safe creation is not possible. If a README exists but its resource index is not wrapped in markers, you may add the markers then run the script, to avoid a hand-written list drifting from the directory.
+- **Topic-index gap**: when a `Resources/<topic>/` has 3+ notes but no topic README / Map of Content, and the directory and target file are non-protected, you may create a short topic README. The README's "资料索引" section is wrapped between two markers `<!-- BEGIN: resource-index -->` / `<!-- END: resource-index -->`, then run `python3 .claude/skills/optimize-vault/scripts/generate_resource_index.py --dir "Resources/<topic>"` to fill it; outside the marker block, write topic positioning, ownership, and hand-written notes. Only report when safe creation is not possible. If a README exists but its resource index is not wrapped in markers, you may add the markers then run the script, to avoid a hand-written list drifting from the directory.
 - **Orphan notes**: material notes with neither outbound nor inbound links — prefer adding 1-3 high-confidence links; when unconfirmable, report as an orphan candidate.
 - **Naming and directory anomalies**: files clearly in the wrong topic, titles badly mismatched with paths, or one topic spread across multiple near-identical directories — only report suggestions; cross-directory moves need user confirmation.
-- **frontmatter structure repair**: a note whose first line is not `---` (blockquote, blank line at top, or no frontmatter at all) is treated by Obsidian as having no frontmatter; for non-protected notes run `<python> .claude/skills/optimize-vault/scripts/fix_frontmatter.py <file>` to repair the structure (move YAML to line 1, synthesize missing frontmatter, move a `> 内容指纹：` blockquote into `content_fingerprint`). The script also detects and fixes **double frontmatter** (garbled PDF content between two `---` blocks — merges the real later frontmatter to line 1 and removes noise) and **smart/curly quotes** (`“”‘’` → straight `""''`) in frontmatter values. After repair, Read the file to confirm frontmatter is on line 1 and the body is intact.
+- **frontmatter structure repair**: a note whose first line is not `---` (blockquote, blank line at top, or no frontmatter at all) is treated by Obsidian as having no frontmatter; for non-protected notes run `python3 .claude/skills/optimize-vault/scripts/fix_frontmatter.py <file>` to repair the structure (move YAML to line 1, synthesize missing frontmatter, move a `> 内容指纹：` blockquote into `content_fingerprint`). The script also detects and fixes **double frontmatter** (garbled PDF content between two `---` blocks — merges the real later frontmatter to line 1 and removes noise) and **smart/curly quotes** (`“”‘’` → straight `""''`) in frontmatter values. After repair, Read the file to confirm frontmatter is on line 1 and the body is intact.
 - **frontmatter value validation**: the scan report's `invalid_frontmatter` lists notes whose `---` fences are on line 1 but have issues that break Obsidian properties: (a) an unquoted scalar value contains `: ` (colon+space), (b) values wrapped in smart/curly quotes (`“”‘’`) which YAML doesn't recognize as string delimiters. Both cause Obsidian to silently drop all properties / Dataview. For (a), fix by hand: double-quote the offending value with straight quotes. For (b), `fix_frontmatter.py` can auto-replace smart quotes with straight quotes. Quoted strings, flow collections, list items, and `sha256:abc` (colon with no space) are not flagged.
 - **Duplicate tags / status inconsistency**: minimal corrections are fine, e.g. `status: inbox` left behind in an organized directory. `status` should express lifecycle only (`active` / `done` / `archived`); legacy `status: resource/area/project` is only reported, not auto-changed; do not reorder frontmatter at scale.
 
@@ -134,12 +134,13 @@ Beyond dedup and linking, check these low-risk optimizations:
 
 Allowed auto-modifications are limited to (anything not in this list is report-only, not executed):
 
-- The script's `apply-safe` adding `source_url` / `content_fingerprint` to non-protected material notes
-- The script's `apply-safe` moving strongly-evidenced original source files into lowercase `source/` via `git mv`, renaming them to match the Markdown filename stem, and updating `source_file` plus the visible `Original file` link
+- The script's `apply-safe` adding `source_url` / `source_fingerprint` to non-protected material notes
+- The script's `apply-safe` moving strongly-evidenced original source files into lowercase `source/` via `git mv`, renaming them to match the Markdown filename stem, and updating `source_file` plus the visible `原始文件` link
 - The script's `apply-safe` moving exact-duplicate notes into `Archive/Duplicates/` via `git mv` and adding the duplicate marker
 - The script's `apply-safe` adding a short duplicate record to canonical
 - The script's `apply-safe` repairing a uniquely-matched broken link
 - The script's `apply-safe` deleting 0-byte empty stubs and fixing the wikilinks that caused them
+- The script's `apply-safe` creating/updating non-protected topic README resource-index sections for deterministic topic-index gaps
 - The script's `apply-safe` writing `.claude/optimize-vault.log`
 - Running `.claude/skills/optimize-vault/scripts/fix_frontmatter.py` to repair frontmatter structure for non-protected notes (first line not `---` or no frontmatter)
 - Running `.claude/skills/optimize-vault/scripts/generate_resource_index.py --dir "Resources/<topic>"` to update the resource-index marker block for a non-protected topic README (only when the README already has the marker block)
@@ -167,7 +168,7 @@ Run `git status --short` and confirm:
 - No deleted, cleared, or Git-deleted duplicate notes.
 - Every link addition has a clear target and produces no empty link.
 - Every fixed broken link now uses the target file's actual filename stem (not title).
-- Every normalized original source file exists at `<note directory>/source/<Markdown filename stem><extension>`, and the note's `source_file` plus visible `Original file` link point to that path.
+- Every normalized original source file exists at `<note directory>/source/<Markdown filename stem><extension>`, and the note's `source_file` plus visible `原始文件` link point to that path.
 - All fixable empty stubs are deleted; no 0-byte `.md` stubs remain at the vault root or in unexpected directories.
 - No high-risk report-only suggestion was actually executed.
 

@@ -14,10 +14,10 @@ How it works:
 - Anything outside the marker block (topic positioning, ownership notes, annotations) is left untouched.
 
 Usage:
-  <python> generate_resource_index.py --dir "Resources/Loop Engineering"
-  <python> generate_resource_index.py --dir "Resources/Loop Engineering" --check
-  <python> generate_resource_index.py --all            # scan every Resources/<topic>/
-  <python> generate_resource_index.py --all --check
+  python3 generate_resource_index.py --dir "Resources/Loop Engineering"
+  python3 generate_resource_index.py --dir "Resources/Loop Engineering" --check
+  python3 generate_resource_index.py --all            # scan every Resources/<topic>/
+  python3 generate_resource_index.py --all --check
 """
 from __future__ import annotations
 import argparse
