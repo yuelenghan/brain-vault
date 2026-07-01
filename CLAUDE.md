@@ -41,7 +41,7 @@
 - 初始化 brain：运行 `/setup-brain`。
 - 手动整理 Inbox：运行 `/organize-inbox`。
 - 优化已整理笔记：运行 `/optimize-vault`。
-- 离线兜底整理：在 vault 根目录运行 `VAULT="$PWD" .claude/organize.sh`。
+- 离线兜底整理：macOS / Linux 在 vault 根目录运行 `.claude/organize.sh`；Windows PowerShell 运行 `.claude/organize.ps1`。
 - Copilot CLI：在 vault 根目录运行 `copilot`，并参考 `.github/copilot-instructions.md`。
 - Codex CLI：在 vault 根目录运行 `codex`，并参考 `AGENTS.md`。
 

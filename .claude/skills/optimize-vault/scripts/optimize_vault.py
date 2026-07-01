@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,9 +21,43 @@ TRACKING_PARAMS = {"fbclid", "gclid", "msclkid", "dclid", "igshid"}
 TRACKING_PREFIXES = ("utm_",)
 WIKILINK_RE = re.compile(r"!?(?<!\!)\[\[([^\]]+)\]\]")
 URL_RE = re.compile(r"https?://[^\s)\]}>\"']+")
-FIXED_REPORT_DIR = Path("/tmp").resolve()
+FIXED_REPORT_DIR = Path(tempfile.gettempdir()).resolve()
 FIXED_JSON_REPORT = FIXED_REPORT_DIR / "optimize-vault.json"
 FIXED_MARKDOWN_REPORT = FIXED_REPORT_DIR / "optimize-vault.md"
+SOURCE_EXTENSIONS = {
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".pdf",
+    ".txt",
+    ".text",
+    ".markdown",
+    ".csv",
+    ".json",
+    ".jsonl",
+    ".html",
+    ".htm",
+    ".epub",
+    ".ipynb",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".wav",
+    ".mp3",
+    ".m4a",
+    ".mp4",
+    ".mov",
+    ".aac",
+    ".aiff",
+    ".flac",
+    ".ogg",
+    ".opus",
+    ".webm",
+}
 
 
 @dataclass
@@ -111,6 +146,10 @@ def is_relative_inside(path: Path, root: Path) -> bool:
         return False
 
 
+def is_organize_marker(line: str) -> bool:
+    return line.startswith("> Organized from Inbox") or line.startswith("> 整理自 Inbox")
+
+
 def parse_frontmatter(text: str) -> tuple[dict[str, str], list[str], str]:
     lines = text.splitlines()
     start = None
@@ -118,7 +157,7 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], list[str], str]:
         if line.strip() == "---":
             start = idx
             break
-        if line.strip() and not line.startswith("> Organized from Inbox"):
+        if line.strip() and not is_organize_marker(line):
             break
     if start is None:
         return {}, [], text
@@ -219,6 +258,10 @@ def normalize_name(name: str) -> str:
     return re.sub(r"\s+", " ", Path(name).stem.strip()).lower()
 
 
+def normalize_relpath(path: str | Path) -> str:
+    return Path(path).as_posix().lower()
+
+
 def normalize_url(url: str) -> str:
     url = strip_quotes(url.strip())
     try:
@@ -241,15 +284,15 @@ def normalize_body_for_hash(text: str) -> str:
     out: list[str] = []
     for line in body.splitlines():
         stripped = line.strip()
-        if stripped.startswith("> Organized from Inbox"):
+        if is_organize_marker(stripped):
             continue
-        if "content fingerprint" in stripped or stripped.startswith("content_fingerprint:"):
+        if "content fingerprint" in stripped or "内容指纹" in stripped or stripped.startswith("content_fingerprint:"):
             continue
         if stripped.startswith("source_url:") or stripped.startswith("canonical_url:"):
             continue
         if re.match(r"^source:\s*https?://", stripped):
             continue
-        if re.match(r"^>\s*(Source URL|Source|Duplicate content|Duplication evidence|canonical):?", stripped):
+        if re.match(r"^>\s*(Source URL|Source|Duplicate content|Duplication evidence|canonical|来源 URL|来源|重复内容|重复依据)[:：]?", stripped):
             continue
         out.append(line)
     body = "\n".join(out)
@@ -272,7 +315,7 @@ def extract_urls(frontmatter: dict[str, str], text: str) -> list[str]:
         if value.startswith("http://") or value.startswith("https://"):
             urls.append(normalize_url(value))
     for line in text.splitlines():
-        if any(marker in line for marker in ("Source URL", "Source:", "source:")):
+        if any(marker in line for marker in ("Source URL", "Source:", "source:", "来源 URL", "来源：", "来源:")):
             for match in URL_RE.findall(line):
                 urls.append(normalize_url(match))
     return list(dict.fromkeys(urls))
@@ -288,6 +331,20 @@ def iter_markdown(vault: Path, scopes: list[str]) -> list[Path]:
             if path.is_symlink() or not path.is_file():
                 continue
             files.append(path)
+    return sorted(files)
+
+
+def iter_source_files(vault: Path, scopes: list[str]) -> list[Path]:
+    files: list[Path] = []
+    for scope in scopes:
+        scope_path = (vault / scope).resolve()
+        if not is_relative_inside(scope_path, vault) or not scope_path.exists():
+            continue
+        for path in scope_path.rglob("*"):
+            if path.is_symlink() or not path.is_file():
+                continue
+            if path.suffix.lower() in SOURCE_EXTENSIONS:
+                files.append(path)
     return sorted(files)
 
 
@@ -313,13 +370,13 @@ def read_note(vault: Path, path: Path, protected: set[str]) -> Note:
         fingerprint_valid=not stored_fingerprint or stored_fingerprint == computed_fingerprint,
         invalid_frontmatter=find_invalid_frontmatter(text),
         content_length=len(normalize_body_for_hash(text)),
-        has_summary="## Summary" in text or "## Abstract" in text,
+        has_summary="## Summary" in text or "## Abstract" in text or "## 提炼" in text or "## 摘要" in text,
         outbound_count=len(links),
         protected=is_protected(rel, protected),
     )
 
 
-def build_index(vault: Path, scopes: list[str], protected: set[str]) -> tuple[list[Note], dict[str, list[Note]], set[str]]:
+def build_index(vault: Path, scopes: list[str], protected: set[str]) -> tuple[list[Note], dict[str, list[Note]], set[str], set[str]]:
     notes = [read_note(vault, path, protected) for path in iter_markdown(vault, scopes)]
     by_name: dict[str, list[Note]] = defaultdict(list)
     file_stems: set[str] = set()
@@ -334,7 +391,10 @@ def build_index(vault: Path, scopes: list[str], protected: set[str]) -> tuple[li
             matches = by_name.get(normalize_name(link), [])
             for match in matches:
                 match.inbound_count += 1
-    return notes, by_name, file_stems
+    attachment_targets = {
+        normalize_relpath(path.relative_to(vault)) for path in iter_source_files(vault, scopes)
+    }
+    return notes, by_name, file_stems, attachment_targets
 
 
 def canonical_score(note: Note) -> tuple[int, int, int, int, int, str]:
@@ -389,19 +449,34 @@ def duplicate_groups(notes: list[Note]) -> list[dict]:
     return sorted(results, key=lambda item: item["canonical"])
 
 
-def broken_links(notes: list[Note], by_name: dict[str, list[Note]], file_stems: set[str]) -> list[dict]:
+def attachment_link_exists(note_path: str, link: str, attachment_targets: set[str]) -> bool:
+    target = wikilink_target(link)
+    if Path(target).suffix.lower() not in SOURCE_EXTENSIONS:
+        return False
+    note_dir = Path(note_path).parent
+    candidates = [
+        normalize_relpath(target),
+        normalize_relpath(note_dir / target),
+    ]
+    return any(candidate in attachment_targets for candidate in candidates)
+
+
+def broken_links(notes: list[Note], by_name: dict[str, list[Note]], file_stems: set[str], attachment_targets: set[str]) -> list[dict]:
     """Find wikilinks whose target does not match any existing file's filename stem.
 
     Obsidian resolves [[X]] → X.md by **filename**, not by frontmatter title
     or alias. A wikilink that matches a note's title but not its filename is
     still broken — Obsidian will create a 0-byte stub file when the link is
-    clicked. This function checks file_stems first; title/alias matches are
-    treated as "soft match" findings that need the wikilink text updated to
-    use the actual filename stem.
+    clicked. Source-file links such as [[source/Paper.pdf]] are valid when
+    the attachment exists. This function checks real filenames first;
+    title/alias matches are treated as "soft match" findings that need the
+    wikilink text updated to use the actual filename stem.
     """
     findings: list[dict] = []
     for note in notes:
         for link in sorted(set(note.wikilinks)):
+            if attachment_link_exists(note.path, link, attachment_targets):
+                continue
             key = normalize_name(link)
             # Primary check: does any FILE have this exact stem?
             if key in file_stems:
@@ -426,6 +501,165 @@ def broken_links(notes: list[Note], by_name: dict[str, list[Note]], file_stems: 
                 finding["status"] = "unique" if len(set(loose)) == 1 else "ambiguous"
                 findings.append(finding)
     return findings
+
+
+def clean_source_ref(value: str) -> str:
+    value = strip_quotes(value.strip())
+    value = value.strip("`").strip()
+    value = value.rstrip("。.;；")
+    return wikilink_target(value)
+
+
+def source_refs_from_text(note: Note) -> list[dict]:
+    text = note.abs_path.read_text(encoding="utf-8")
+    refs: list[dict] = []
+    source_file = note.frontmatter.get("source_file")
+    if source_file:
+        refs.append({"kind": "frontmatter", "ref": clean_source_ref(source_file)})
+    for line in text.splitlines():
+        if "Original file" not in line and "原始文件" not in line:
+            continue
+        wikilinks = WIKILINK_RE.findall(line)
+        if wikilinks:
+            refs.append({"kind": "body", "ref": clean_source_ref(wikilinks[0])})
+            continue
+        backtick = re.search(r"`([^`]+)`", line)
+        if backtick:
+            refs.append({"kind": "body", "ref": clean_source_ref(backtick.group(1))})
+            continue
+        if "Original file" in line:
+            _, _, tail = line.partition("Original file")
+        else:
+            _, _, tail = line.partition("原始文件")
+        tail = tail.lstrip("：:").strip()
+        if tail:
+            refs.append({"kind": "body", "ref": clean_source_ref(tail)})
+    return refs
+
+
+def resolve_source_ref(vault: Path, note_path: str, ref: str) -> str | None:
+    if not ref:
+        return None
+    raw = Path(ref)
+    candidates: list[Path] = []
+    if raw.is_absolute():
+        candidates.append(raw)
+    else:
+        note_dir = Path(note_path).parent
+        candidates.extend([vault / raw, vault / note_dir / raw])
+    for candidate in candidates:
+        try:
+            rel = candidate.resolve().relative_to(vault.resolve()).as_posix()
+        except ValueError:
+            continue
+        if (vault / rel).exists():
+            return rel
+    try:
+        fallback = (vault / Path(note_path).parent / raw).resolve().relative_to(vault.resolve()).as_posix()
+    except ValueError:
+        return None
+    return fallback
+
+
+def expected_source_rel(note_path: str, source_rel: str) -> str:
+    note = Path(note_path)
+    suffix = Path(source_rel).suffix
+    return (note.parent / "source" / f"{note.stem}{suffix}").as_posix()
+
+
+def canonical_source_ref(note_path: str, source_rel: str) -> str:
+    note = Path(note_path)
+    suffix = Path(source_rel).suffix
+    return f"source/{note.stem}{suffix}"
+
+
+def infer_note_for_source(source_rel: str, notes_by_path: dict[str, Note]) -> Note | None:
+    source_path = Path(source_rel)
+    parent = source_path.parent
+    note_dir = parent.parent if parent.name.lower() in {"source", "sources"} else parent
+    candidate = (note_dir / f"{source_path.stem}.md").as_posix()
+    return notes_by_path.get(candidate)
+
+
+def source_policy_status(vault: Path, note: Note, actual: str, expected: str, protected: set[str]) -> tuple[str, str]:
+    if is_protected(note.path, protected) or is_protected(actual, protected) or is_protected(expected, protected):
+        return "protected", "note or source file has pre-existing uncommitted changes"
+    if actual != expected and (vault / expected).exists():
+        return "destination_exists", "expected source destination already exists"
+    if Path(actual).suffix.lower() not in SOURCE_EXTENSIONS:
+        return "unsupported_extension", "source file extension is outside the managed source policy"
+    return "fixable", "source file can be moved and note references can be normalized"
+
+
+def source_file_anomalies(vault: Path, scopes: list[str], notes: list[Note], protected: set[str]) -> list[dict]:
+    findings: list[dict] = []
+    notes_by_path = {note.path: note for note in notes}
+    referenced_sources: set[str] = set()
+    seen: set[tuple[str, str]] = set()
+
+    for note in notes:
+        refs = source_refs_from_text(note)
+        if not refs:
+            continue
+        resolved = [resolve_source_ref(vault, note.path, item["ref"]) for item in refs]
+        actual = next((item for item in resolved if item), None)
+        if actual is None or not (vault / actual).exists():
+            findings.append({
+                "note": note.path,
+                "actual": refs[0]["ref"] if refs else "",
+                "expected": "",
+                "status": "missing_source",
+                "reason": "source reference does not resolve to an existing file",
+            })
+            continue
+        referenced_sources.add(actual)
+        expected = expected_source_rel(note.path, actual)
+        canonical_ref = canonical_source_ref(note.path, actual)
+        ref_values = {item["ref"] for item in refs}
+        has_frontmatter = any(item["kind"] == "frontmatter" for item in refs)
+        canonical_refs = ref_values == {canonical_ref} and has_frontmatter
+        if actual == expected and canonical_refs:
+            continue
+        status, reason = source_policy_status(vault, note, actual, expected, protected)
+        key = (note.path, actual)
+        if key in seen:
+            continue
+        seen.add(key)
+        findings.append({
+            "note": note.path,
+            "actual": actual,
+            "expected": expected,
+            "canonical_ref": canonical_ref,
+            "status": status,
+            "reason": reason,
+        })
+
+    for path in iter_source_files(vault, scopes):
+        source_rel = path.relative_to(vault).as_posix()
+        if source_rel in referenced_sources:
+            continue
+        note = infer_note_for_source(source_rel, notes_by_path)
+        if note is None:
+            findings.append({
+                "note": "",
+                "actual": source_rel,
+                "expected": "",
+                "status": "unmatched_note",
+                "reason": "source file has no same-stem Markdown note and no source_file reference",
+            })
+            continue
+        expected = expected_source_rel(note.path, source_rel)
+        canonical_ref = canonical_source_ref(note.path, source_rel)
+        status, reason = source_policy_status(vault, note, source_rel, expected, protected)
+        findings.append({
+            "note": note.path,
+            "actual": source_rel,
+            "expected": expected,
+            "canonical_ref": canonical_ref,
+            "status": status,
+            "reason": reason,
+        })
+    return sorted(findings, key=lambda item: (item.get("note", ""), item.get("actual", "")))
 
 
 def empty_stubs(vault: Path, notes: list[Note], by_name: dict[str, list[Note]]) -> list[dict]:
@@ -610,7 +844,7 @@ def insert_frontmatter_fields(text: str, fields: dict[str, str]) -> str:
                         end = j
                         break
                 break
-            if line.strip() and not line.startswith("> Organized from Inbox"):
+            if line.strip() and not is_organize_marker(line):
                 break  # Non-preamble, non-fence content → no frontmatter at top.
 
     # If still not found, search deeper for any frontmatter block.
@@ -664,6 +898,95 @@ def replace_wikilink(text: str, old: str, new: str) -> str:
         return f"[[{new}{suffix}{alias}]]"
 
     return WIKILINK_RE.sub(repl, text)
+
+
+def upsert_source_file_frontmatter(text: str, canonical_ref: str) -> str:
+    trailing_newline = text.endswith("\n")
+    lines = text[:-1].split("\n") if trailing_newline else text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return text
+    end = None
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            end = idx
+            break
+    if end is None:
+        return text
+    for idx in range(1, end):
+        if lines[idx].startswith("source_file:"):
+            lines[idx] = f'source_file: "{canonical_ref}"'
+            return "\n".join(lines) + ("\n" if trailing_newline else "")
+    lines.insert(end, f'source_file: "{canonical_ref}"')
+    return "\n".join(lines) + ("\n" if trailing_newline else "")
+
+
+def strip_inline_original_file(marker: str) -> str:
+    for token in (" Original file", "。Original file", "。原始文件", " 原始文件"):
+        if token in marker:
+            marker = marker.split(token, 1)[0]
+    return marker.rstrip("。 ")
+
+
+def normalize_original_file_line(text: str, canonical_ref: str) -> str:
+    trailing_newline = text.endswith("\n")
+    lines = text[:-1].split("\n") if trailing_newline else text.split("\n")
+    output: list[str] = []
+    replaced = False
+    for line in lines:
+        if is_organize_marker(line):
+            output.append(strip_inline_original_file(line))
+            output.append(f"Original file: [[{canonical_ref}]]")
+            replaced = True
+            continue
+        if "Original file" in line or "原始文件" in line:
+            if not replaced:
+                output.append(f"Original file: [[{canonical_ref}]]")
+                replaced = True
+            continue
+        output.append(line)
+    if not replaced:
+        insert_at = 0
+        if output and output[0].strip() == "---":
+            for idx in range(1, len(output)):
+                if output[idx].strip() == "---":
+                    insert_at = idx + 1
+                    break
+        output.insert(insert_at, f"Original file: [[{canonical_ref}]]")
+    return "\n".join(output) + ("\n" if trailing_newline else "")
+
+
+def normalize_source_note_text(text: str, canonical_ref: str) -> str:
+    text = upsert_source_file_frontmatter(text, canonical_ref)
+    return normalize_original_file_line(text, canonical_ref)
+
+
+def apply_source_file_policy(vault: Path, report: dict) -> None:
+    for item in report.get("source_file_anomalies", []):
+        if item.get("status") != "fixable" or not item.get("note"):
+            continue
+        note_rel = item["note"]
+        actual = item["actual"]
+        expected = item["expected"]
+        canonical_ref = item["canonical_ref"]
+        if actual != expected:
+            (vault / expected).parent.mkdir(parents=True, exist_ok=True)
+            moved = run_git(vault, ["mv", actual, expected])
+            if moved.returncode != 0:
+                item["status"] = "git_mv_failed"
+                item["reason"] = moved.stderr.strip() or "git mv failed"
+                report["skipped_uncertain"].append({"type": "source_file_policy", **item})
+                continue
+        note_path = vault / note_rel
+        text = note_path.read_text(encoding="utf-8")
+        new_text = normalize_source_note_text(text, canonical_ref)
+        if new_text != text:
+            note_path.write_text(new_text, encoding="utf-8")
+        report["applied"]["source_files"].append({
+            "note": note_rel,
+            "old": actual,
+            "new": expected,
+            "source_file": canonical_ref,
+        })
 
 
 def ensure_parent(path: Path) -> None:
@@ -807,6 +1130,7 @@ def append_log(vault: Path, report: dict, date: str) -> None:
         f"- Broken links fixed: {len(report['applied']['broken_links'])}\n"
         f"- Empty stubs cleaned: {len(report['applied']['empty_stubs'])}\n"
         f"- Metadata backfilled: {len(report['applied']['metadata'])}\n"
+        f"- Source files normalized: {len(report['applied'].get('source_files', []))}\n"
         f"- Invalid frontmatter values: {len(report.get('invalid_frontmatter', []))}\n"
         f"- Structure suggestions: {len(report['orphan_notes'])}\n"
         "commit: none\n"
@@ -817,21 +1141,22 @@ def append_log(vault: Path, report: dict, date: str) -> None:
 
 def build_report(vault: Path, scopes: list[str]) -> dict:
     protected = protected_paths(vault)
-    notes, by_name, file_stems = build_index(vault, scopes, protected)
+    notes, by_name, file_stems, attachment_targets = build_index(vault, scopes, protected)
     empty_stub_findings = empty_stubs(vault, notes, by_name)
     report = {
         "scope": scopes,
         "coverage": coverage(notes),
         "protected_paths": sorted(protected),
         "duplicates": duplicate_groups(notes),
-        "broken_links": broken_links(notes, by_name, file_stems),
+        "broken_links": broken_links(notes, by_name, file_stems, attachment_targets),
         "empty_stubs": empty_stub_findings,
+        "source_file_anomalies": source_file_anomalies(vault, scopes, notes, protected),
         "metadata_missing": metadata_missing(notes),
         "orphan_notes": orphan_notes(notes),
         "invalid_fingerprints": invalid_fingerprints(notes),
         "invalid_frontmatter": invalid_frontmatter_list(notes),
-        "applied": {"duplicates": [], "metadata": [], "broken_links": [], "empty_stubs": []},
-        "report_only": {"suspected_duplicates": [], "structure_suggestions": []},
+        "applied": {"duplicates": [], "metadata": [], "broken_links": [], "empty_stubs": [], "source_files": []},
+        "report_only": {"suspected_duplicates": [], "structure_suggestions": [], "unmatched_source_files": []},
         "skipped_uncertain": [],
         "verification": {},
     }
@@ -842,6 +1167,9 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
         report["skipped_uncertain"].append({"type": "stale_or_invalid_fingerprint", **item})
     for item in report["invalid_frontmatter"]:
         report["skipped_uncertain"].append({"type": "invalid_frontmatter_value", **item})
+    for item in report["source_file_anomalies"]:
+        if item["status"] != "fixable":
+            report["skipped_uncertain"].append({"type": "source_file_policy", **item})
     return report
 
 
@@ -871,7 +1199,7 @@ def markdown_report(report: dict) -> str:
     )
     evidence_summary = summarize_items(
         [*protected_items, *evidence_items],
-        lambda item: f"{item.get('type')}: `{item.get('path') or item.get('source') or item.get('link')}`",
+        lambda item: f"{item.get('type')}: `{item.get('path') or item.get('source') or item.get('actual') or item.get('link')}`",
     )
     invalid_count = len(report.get("invalid_fingerprints", []))
     invalid_fm_count = len(report.get("invalid_frontmatter", []))
@@ -889,6 +1217,15 @@ def markdown_report(report: dict) -> str:
         for item in report.get("empty_stubs", [])
         if item["status"] != "fixable"
     ]
+    source_fix_lines = [
+        f"- `{item['old']}` -> `{item['new']}`; note `{item['note']}`"
+        for item in report["applied"].get("source_files", [])
+    ]
+    source_pending_lines = [
+        f"- `{item.get('actual')}` ({item.get('status')}): {item.get('reason')}"
+        for item in report.get("source_file_anomalies", [])
+        if item.get("status") != "fixable"
+    ]
     lines = [
         "## Scope and scan results",
         f"- Scope: {', '.join(report['scope'])}",
@@ -898,6 +1235,7 @@ def markdown_report(report: dict) -> str:
         f"- Duplicate archival: {len(report['applied']['duplicates']) or 'none'}",
         f"- Link additions: none (semantic link additions are only suggested by the model based on the script report)",
         f"- Metadata backfill: {len(report['applied']['metadata']) or 'none'}",
+        "- Source file normalization: " + ("\n" + "\n".join(source_fix_lines) if source_fix_lines else "none"),
         f"- Broken links fixed: {len(report['applied']['broken_links']) or 'none'}",
         "- Empty stubs cleanup: " + ("\n" + "\n".join(empty_stub_lines) if empty_stub_lines else "none"),
         "",
@@ -905,6 +1243,7 @@ def markdown_report(report: dict) -> str:
         "- Exact duplicate candidates: " + ("; ".join(duplicate_lines) if duplicate_lines else "none"),
         f"- Suspected duplicates: {len(suspected) if suspected else 'none'}",
         f"- Orphan notes: {len(report['orphan_notes']) if report['orphan_notes'] else 'none'}",
+        "- Source file anomalies: " + ("\n" + "\n".join(source_pending_lines) if source_pending_lines else "none"),
         "- Invalid frontmatter values (Obsidian properties break; quote any value containing `: `): " + ("\n" + "\n".join(invalid_fm_lines) if invalid_fm_lines else "none"),
         "",
         "## Skipped / uncertain",
@@ -936,13 +1275,18 @@ def safe_self_check(vault: Path, report: dict) -> None:
         if (vault / item["stub"]).exists():
             stub_not_deleted = True
             break
-    report["verification"]["self_check"] = "passed" if not bad_delete and not duplicate_missing and not stub_not_deleted else "failed"
+    source_missing = False
+    for item in report["applied"].get("source_files", []):
+        if not (vault / item["new"]).exists():
+            source_missing = True
+            break
+    report["verification"]["self_check"] = "passed" if not bad_delete and not duplicate_missing and not stub_not_deleted and not source_missing else "failed"
 
 
 def checked_report_path(raw: str, expected: Path, label: str) -> Path:
     out = Path(raw).resolve()
     if out != expected:
-        raise ValueError(f"{label} report path must be /tmp/{expected.name}")
+        raise ValueError(f"{label} report path must be {expected}")
     if out.exists() and out.is_symlink():
         raise ValueError(f"{label} report path must not be a symlink")
     return out
@@ -950,7 +1294,7 @@ def checked_report_path(raw: str, expected: Path, label: str) -> Path:
 
 def write_report_file(path: Path, content: str) -> None:
     if path.parent != FIXED_REPORT_DIR:
-        raise ValueError("report parent must be /tmp")
+        raise ValueError(f"report parent must be {FIXED_REPORT_DIR}")
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
@@ -1000,12 +1344,14 @@ def main(argv: list[str]) -> int:
     report = build_report(vault, scopes)
     if args.mode == "apply-safe":
         protected = set(report["protected_paths"])
-        notes, _by_name, _file_stems = build_index(vault, scopes, protected)
+        notes, _by_name, _file_stems, _attachment_targets = build_index(vault, scopes, protected)
         date = args.date or "undated"
+        apply_source_file_policy(vault, report)
+        notes, _by_name, _file_stems, _attachment_targets = build_index(vault, scopes, protected)
         apply_metadata(notes, report)
-        notes, _by_name, _file_stems = build_index(vault, scopes, protected)
+        notes, _by_name, _file_stems, _attachment_targets = build_index(vault, scopes, protected)
         apply_duplicates(vault, notes, report, date)
-        notes, _by_name, _file_stems = build_index(vault, scopes, protected)
+        notes, _by_name, _file_stems, _attachment_targets = build_index(vault, scopes, protected)
         apply_broken_links(vault, notes, report)
         apply_empty_stubs(vault, report)
         if not args.no_log:

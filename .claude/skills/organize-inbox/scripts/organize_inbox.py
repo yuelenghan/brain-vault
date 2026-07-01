@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,7 +26,7 @@ SCOPES = ("Projects", "Areas", "Resources", "Archive")
 TRACKING_PARAMS = {"fbclid", "gclid", "msclkid", "dclid", "igshid"}
 TRACKING_PREFIXES = ("utm_",)
 URL_RE = re.compile(r"https?://[^\s)\]}>\"']+")
-FIXED_REPORT_DIR = Path("/tmp").resolve()
+FIXED_REPORT_DIR = Path(tempfile.gettempdir()).resolve()
 FIXED_JSON_REPORT = FIXED_REPORT_DIR / "organize-inbox.json"
 FIXED_MARKDOWN_REPORT = FIXED_REPORT_DIR / "organize-inbox.md"
 
@@ -202,11 +203,13 @@ def converter_for(path: Path) -> str | None:
         return None
     if suffix in AUDIO_EXTENSIONS:
         # Prefer the dedicated brain-vault audio/video wrapper; fall back for older vaults.
+        if os.name == "nt" and (Path.cwd() / ".claude/bin/safe-whisper.cmd").exists():
+            return ".claude/bin/safe-whisper.cmd"
         if (Path.cwd() / ".claude/bin/safe-whisper").exists():
             return ".claude/bin/safe-whisper"
-        return ".claude/bin/safe-markitdown"
+        return ".claude/bin/safe-markitdown.cmd" if os.name == "nt" else ".claude/bin/safe-markitdown"
     if suffix in SUPPORTED_CONVERT_EXTENSIONS:
-        return ".claude/bin/safe-markitdown"
+        return ".claude/bin/safe-markitdown.cmd" if os.name == "nt" else ".claude/bin/safe-markitdown"
     return None
 
 
@@ -435,7 +438,7 @@ def markdown_report(report: dict) -> str:
 def checked_report_path(raw: str, expected: Path, label: str) -> Path:
     out = Path(raw).resolve()
     if out != expected:
-        raise ValueError(f"{label} report path must be /tmp/{expected.name}")
+        raise ValueError(f"{label} report path must be {expected}")
     if out.exists() and out.is_symlink():
         raise ValueError(f"{label} report path must not be a symlink")
     return out
@@ -443,7 +446,7 @@ def checked_report_path(raw: str, expected: Path, label: str) -> Path:
 
 def write_report_file(path: Path, content: str) -> None:
     if path.parent != FIXED_REPORT_DIR:
-        raise ValueError("report parent must be /tmp")
+        raise ValueError(f"report parent must be {FIXED_REPORT_DIR}")
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW

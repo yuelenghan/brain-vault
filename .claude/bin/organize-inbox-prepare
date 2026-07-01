@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
 SCRIPT = Path(".claude/skills/organize-inbox/scripts/organize_inbox.py")
-JSON_REPORT = "/tmp/organize-inbox.json"
-MARKDOWN_REPORT = "/tmp/organize-inbox.md"
+REPORT_DIR = Path(tempfile.gettempdir()).resolve()
+JSON_REPORT = REPORT_DIR / "organize-inbox.json"
+MARKDOWN_REPORT = REPORT_DIR / "organize-inbox.md"
 
 
 def main(argv: list[str]) -> int:
@@ -19,14 +21,14 @@ def main(argv: list[str]) -> int:
         return 2
     return subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(SCRIPT),
             "--mode",
             "prepare",
             "--json",
-            JSON_REPORT,
+            str(JSON_REPORT),
             "--markdown",
-            MARKDOWN_REPORT,
+            str(MARKDOWN_REPORT),
         ],
         check=False,
     ).returncode

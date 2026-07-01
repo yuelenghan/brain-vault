@@ -32,7 +32,7 @@ command -v codex || true
 command -v uv || true
 command -v brew || true
 command -v npm || true
-command -v python3 || true
+command -v python3 || command -v python || true
 ```
 
 If there are uncommitted changes, do not auto-overwrite the related files; list them as protected paths.
@@ -48,7 +48,7 @@ Ask for the essential information in one pass to avoid repeated interruptions:
 5. Which file formats do you plan to organize? Should document/data/web/Notebook conversion (Word/PDF/PPT/Excel/TXT/CSV/JSON/HTML/EPUB/IPYNB → Markdown) and screenshot-placeholder capability (image → Markdown placeholder) be enabled?
 6. Should audio/video transcription (audio/video → Markdown) be enabled? If yes, do you accept downloading the Whisper model on first real transcription, and do you need to specify a model or language?
 7. Do you need Copilot CLI or Codex CLI support?
-8. Do you need offline auto-organize? If yes, do you prefer running `organize.sh` manually, system crontab/launchd, or in-session Claude Code scheduling?
+8. Do you need offline auto-organize? If yes, do you prefer running the platform offline entry manually, system crontab/launchd/Windows Task Scheduler, or in-session Claude Code scheduling?
 
 If the user only wants a quick initialization, conservative defaults are acceptable: keep existing collaboration preferences, create empty PARA directories, and only detect tools without installing.
 
@@ -100,7 +100,7 @@ Preserve empty directories with `.gitkeep`.
 - Whisper model: the first real transcription may download the default model; verify the current default model and `--model` parameter with `whisper --help`, and specify via `WHISPER_MODEL` if needed.
 - `copilot` / `gh copilot`: for the GitHub Copilot CLI.
 - `codex`: for the OpenAI Codex CLI.
-- `uv`, `brew`, `npm`, `python3`: used to decide the recommended install path.
+- `uv`, `brew`, `npm`, `python3` / `python` / `py`: used to decide the recommended install path.
 
 #### Install principles
 
@@ -119,7 +119,7 @@ If the user enables document conversion and `markitdown` is missing:
    uv tool install markitdown
    ```
 
-2. If there is no `uv` but `python3` is available, suggest the user pick their own Python package manager to install MarkItDown; do not guess a global pip strategy for them.
+2. If there is no `uv` but Python is available, suggest the user pick their own Python package manager to install MarkItDown; do not guess a global pip strategy for them.
 3. Verify after install:
 
    ```bash
@@ -188,7 +188,7 @@ If the user enables Codex CLI support:
 
 ### 6. Wrapper check
 
-Confirm the following files exist and are executable:
+Confirm the wrapper files exist. On macOS / Linux, the extensionless wrappers and `.claude/organize.sh` should also be executable:
 
 ```bash
 test -x .claude/bin/safe-markitdown
@@ -205,15 +205,38 @@ test -x .claude/bin/organize-inbox-apply-duplicates
 If not executable, run:
 
 ```bash
-chmod +x .claude/bin/safe-markitdown .claude/bin/safe-whisper .claude/bin/safe-mkdir .claude/bin/safe-git-add .claude/bin/safe-git-mv .claude/bin/safe-git-commit .claude/bin/organize-inbox-scan .claude/bin/organize-inbox-prepare .claude/bin/organize-inbox-apply-duplicates .claude/organize.sh
+chmod +x .claude/bin/safe-markitdown .claude/bin/safe-whisper .claude/bin/safe-mkdir .claude/bin/safe-git-add .claude/bin/safe-git-mv .claude/bin/safe-git-commit .claude/bin/organize-inbox-scan .claude/bin/organize-inbox-prepare .claude/bin/organize-inbox-apply-duplicates .claude/organize.sh .claude/organize.py
 ```
 
-Run syntax checks:
+On Windows PowerShell, confirm the `.cmd` wrappers and PowerShell entry exist:
+
+```powershell
+Test-Path .\.claude\bin\safe-markitdown.cmd
+Test-Path .\.claude\bin\safe-whisper.cmd
+Test-Path .\.claude\bin\safe-mkdir.cmd
+Test-Path .\.claude\bin\safe-git-add.cmd
+Test-Path .\.claude\bin\safe-git-mv.cmd
+Test-Path .\.claude\bin\safe-git-commit.cmd
+Test-Path .\.claude\bin\organize-inbox-scan.cmd
+Test-Path .\.claude\bin\organize-inbox-prepare.cmd
+Test-Path .\.claude\bin\organize-inbox-apply-duplicates.cmd
+Test-Path .\.claude\organize.ps1
+```
+
+Run syntax checks on macOS / Linux:
 
 ```bash
-python3 -m py_compile .claude/bin/safe-markitdown .claude/bin/safe-whisper .claude/bin/safe-mkdir .claude/bin/safe-git-add .claude/bin/safe-git-mv .claude/bin/safe-git-commit .claude/bin/organize-inbox-scan .claude/bin/organize-inbox-prepare .claude/bin/organize-inbox-apply-duplicates
-zsh -n .claude/organize.sh
-python3 -m json.tool .copilot/.github/plugin/plugin.json >/tmp/brain-vault-plugin-json-check.out
+python3 -m py_compile .claude/organize.py .claude/bin/safe-markitdown .claude/bin/safe-whisper .claude/bin/safe-mkdir .claude/bin/safe-git-add .claude/bin/safe-git-mv .claude/bin/safe-git-commit .claude/bin/organize-inbox-scan .claude/bin/organize-inbox-prepare .claude/bin/organize-inbox-apply-duplicates
+sh -n .claude/organize.sh
+python3 -m json.tool .copilot/.github/plugin/plugin.json > "$(python3 -c 'import tempfile; print(tempfile.gettempdir())')/brain-vault-plugin-json-check.out"
+```
+
+Run syntax checks on Windows PowerShell:
+
+```powershell
+py -3 -m py_compile .\.claude\organize.py .\.claude\bin\safe-markitdown .\.claude\bin\safe-whisper .\.claude\bin\safe-mkdir .\.claude\bin\safe-git-add .\.claude\bin\safe-git-mv .\.claude\bin\safe-git-commit .\.claude\bin\organize-inbox-scan .\.claude\bin\organize-inbox-prepare .\.claude\bin\organize-inbox-apply-duplicates
+$out = Join-Path ([System.IO.Path]::GetTempPath()) "brain-vault-plugin-json-check.out"
+py -3 -m json.tool .\.copilot\.github\plugin\plugin.json > $out
 ```
 
 ### 7. Optional auto-organize
@@ -221,10 +244,10 @@ python3 -m json.tool .copilot/.github/plugin/plugin.json >/tmp/brain-vault-plugi
 If the user wants auto-organize, explain the three options:
 
 - In-session: use a Claude Code scheduled task to trigger `/organize-inbox`; closing the session or task expiry affects execution.
-- System-level: use crontab/launchd to run `VAULT=/path/to/brain .claude/organize.sh`.
-- Manual: periodically run `/organize-inbox` or `.claude/organize.sh`.
+- System-level: use crontab/launchd on macOS / Linux or Windows Task Scheduler on Windows to run the platform offline entry (`.claude/organize.sh` or `.claude/organize.ps1`).
+- Manual: periodically run `/organize-inbox`, `.claude/organize.sh`, or `.claude/organize.ps1`.
 
-Confirm before modifying the system crontab/launchd.
+Confirm before modifying the system crontab/launchd/Task Scheduler.
 
 ### 8. Final verification and output
 

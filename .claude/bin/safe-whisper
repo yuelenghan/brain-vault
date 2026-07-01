@@ -11,7 +11,6 @@ import tempfile
 from pathlib import Path
 
 
-TRUSTED_CWD = "/usr/bin"
 AUDIO_EXTENSIONS = {
     ".aac",
     ".aiff",
@@ -56,6 +55,20 @@ def resolve_vault() -> Path:
     if os.environ.get("VAULT"):
         return Path(os.environ["VAULT"]).resolve()
     return Path.cwd().resolve()
+
+
+def trusted_cwd() -> str:
+    if os.name == "nt":
+        system_root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR")
+        candidates = []
+        if system_root:
+            candidates.append(Path(system_root) / "System32")
+            candidates.append(Path(system_root))
+        candidates.append(Path(tempfile.gettempdir()))
+        for candidate in candidates:
+            if candidate.is_dir():
+                return str(candidate)
+    return "/usr/bin"
 
 
 def whisper_command(candidate: Path, temp_dir: Path, env: dict[str, str]) -> list[str]:
@@ -126,7 +139,7 @@ def main(argv: list[str]) -> int:
             completed = subprocess.run(
                 command,
                 check=False,
-                cwd=TRUSTED_CWD,
+                cwd=trusted_cwd(),
                 env=env,
             )
             if completed.returncode != 0:

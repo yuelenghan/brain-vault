@@ -16,37 +16,27 @@ Prefer letting the script handle Inbox enumeration, type detection, convertible-
 Read-only scan (no conversion, no moves):
 
 ```bash
-python3 .claude/skills/organize-inbox/scripts/organize_inbox.py \
-  --mode scan \
-  --json /tmp/organize-inbox.json \
-  --markdown /tmp/organize-inbox.md
+.claude/bin/organize-inbox-scan
 ```
 
 Prepare (run safe conversions, still no moves of ordinary material):
 
 ```bash
-python3 .claude/skills/organize-inbox/scripts/organize_inbox.py \
-  --mode prepare \
-  --json /tmp/organize-inbox.json \
-  --markdown /tmp/organize-inbox.md
+.claude/bin/organize-inbox-prepare
 ```
 
 Safe duplicate archival (exact duplicates only):
 
 ```bash
-python3 .claude/skills/organize-inbox/scripts/organize_inbox.py \
-  --mode apply-duplicates \
-  --json /tmp/organize-inbox.json \
-  --markdown /tmp/organize-inbox.md \
-  --date <YYYY-MM-DD>
+.claude/bin/organize-inbox-apply-duplicates <YYYY-MM-DD>
 ```
 
-In headless / allowlist-restricted environments, use the fixed wrappers instead: `.claude/bin/organize-inbox-scan`, `.claude/bin/organize-inbox-prepare`, `.claude/bin/organize-inbox-apply-duplicates <YYYY-MM-DD>`.
+On Windows, use the matching `.cmd` wrappers, for example `.\.claude\bin\organize-inbox-prepare.cmd`.
 
 - When the user only asks for analysis, use `scan`.
 - For a normal Inbox organize, run `prepare` first; if the report contains exact duplicates, follow up with `apply-duplicates` for those.
-- The script's JSON / Markdown output is fixed to `/tmp/organize-inbox.json` and `/tmp/organize-inbox.md`; do not pass other report paths, do not pass `--vault`, and run from the vault root.
-- The script's JSON / Markdown output is the source of truth for file types, conversion results, source fingerprints, and exact-duplicate decisions; before continuing, you must Read `/tmp/organize-inbox.md` or the JSON summary.
+- The script's JSON / Markdown output is fixed to the current OS temp directory as `organize-inbox.json` and `organize-inbox.md`; do not pass other report paths, do not pass `--vault`, and run from the vault root.
+- The script's JSON / Markdown output is the source of truth for file types, conversion results, source fingerprints, and exact-duplicate decisions; before continuing, you must Read the generated `organize-inbox.md` in the current OS temp directory or the JSON summary.
 - The script only trusts recomputed body fingerprints; if the report lists `invalid_fingerprints`, do not auto-dedupe based on those stale frontmatter fingerprints — prefer to report or clean them manually.
 - If the script errors, report the error first; do not fall back to large-scale model-driven edits to the library.
 
@@ -62,18 +52,19 @@ The script runs `git status --short -- . ':!Inbox/**' ':!.claude/organize.log'` 
 ### 3. Determine file type
 
 - `.md`: Read directly, then organize.
-- `.doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf`: convert first with `.claude/bin/safe-markitdown "Inbox/<original filename>"`.
-- `.txt/.text/.markdown/.csv/.json/.jsonl`: treat as text or data export, convert first with `.claude/bin/safe-markitdown "Inbox/<original filename>"`.
-- `.html/.htm/.epub/.ipynb`: treat as web page, ebook, or Notebook, convert first with `.claude/bin/safe-markitdown "Inbox/<original filename>"`.
-- `.png/.jpg/.jpeg/.webp`: treat as a screenshot note, generate a Markdown placeholder with `.claude/bin/safe-markitdown "Inbox/<original filename>"`, then organize following the Markdown flow using the original screenshot content; if the screenshot lacks information, leave it in `Inbox/`.
-- `.wav/.mp3/.m4a/.mp4/.mov/.aac/.aiff/.flac/.ogg/.opus/.webm`: treat as an audio/video note, transcribe to Markdown with `.claude/bin/safe-whisper "Inbox/<original filename>"`, then organize following the Markdown flow.
+- `.doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf`: convert first with `.claude/bin/safe-markitdown "Inbox/<original filename>"` on macOS / Linux, or `.\.claude\bin\safe-markitdown.cmd "Inbox/<original filename>"` on Windows.
+- `.txt/.text/.markdown/.csv/.json/.jsonl`: treat as text or data export, convert first with the same `safe-markitdown` wrapper.
+- `.html/.htm/.epub/.ipynb`: treat as web page, ebook, or Notebook, convert first with the same `safe-markitdown` wrapper.
+- `.png/.jpg/.jpeg/.webp`: treat as a screenshot note, generate a Markdown placeholder with the same `safe-markitdown` wrapper, then organize following the Markdown flow using the original screenshot content; if the screenshot lacks information, leave it in `Inbox/`.
+- `.wav/.mp3/.m4a/.mp4/.mov/.aac/.aiff/.flac/.ogg/.opus/.webm`: treat as an audio/video note, transcribe to Markdown with `.claude/bin/safe-whisper "Inbox/<original filename>"` on macOS / Linux, or `.\.claude\bin\safe-whisper.cmd "Inbox/<original filename>"` on Windows, then organize following the Markdown flow.
 - Conversion rules:
   - Only relative paths under `Inbox/` may be passed; never pass absolute paths, `..`, or any argument starting with `-`.
   - When a same-name `.md` already exists, first check whether it is already the corresponding content note; if it cannot be confirmed, leave the original in `Inbox/` and log "同名 Markdown 冲突，需人工处理" (same-name Markdown conflict, needs manual handling). Do not bypass the wrapper by Writing a dedupe copy yourself.
   - After a successful conversion you must Read the generated `.md`, confirm it is not empty, garbled, or a pure error message, then treat that `.md` as the organizing target.
+  - For Inbox PDFs, the `safe-markitdown` wrapper is the only automatic conversion/extraction boundary. Do not call `pdftotext`, `pdfplumber`, `pypdf`, OCR tools, generic PDF skills, or ad hoc Python PDF extraction as a second pass because the MarkItDown output is noisy. If the generated Markdown is noisy but usable, distill from that generated Markdown and the script report; if it is empty, garbled, or insufficient, leave the PDF in `Inbox/` and log the reason. Use other PDF tooling only when the user explicitly asks for manual PDF analysis outside the Inbox organize flow.
   - Image conversion only produces a filename, format, size, and a to-organize placeholder; when organizing you must combine the original screenshot content to fill in the topic, key information, and next actions — you cannot submit only the placeholder template.
   - When MarkItDown/Whisper/Pillow is unavailable, an optional dependency is missing, the output is empty, the content is unreadable, or information is insufficient, leave the original in `Inbox/` and log the reason; do not move the original and do not commit an empty-shell `.md`.
-  - The original file may be moved with `git mv` into the same target directory or a `Sources/` subdirectory of that topic, but it cannot replace the Markdown content note.
+  - The original non-Markdown file must be moved with `git mv` into a lowercase `source/` subdirectory next to the organized Markdown content note. Its filename stem must match the organized Markdown filename stem exactly, preserving only the original extension (example: `Resources/<topic>/Paper.md` keeps `Resources/<topic>/source/Paper.pdf`). Do not use `Sources/`, the topic root, or the old downloaded filename for organized source files. If the expected destination already exists and cannot be proven to be the same source, leave the original in `Inbox/` and log "原文 source 目标冲突，需人工处理" (source destination conflict, needs manual handling).
 - Other extensions: leave in `Inbox/` by default and log "暂不支持自动整理的文件类型" (file type not yet supported for auto-organize); do not move it unless an existing same-name Markdown content note explicitly references it.
 
 ### 4. Source fingerprint and duplicate check
@@ -137,7 +128,9 @@ A converted note without frontmatter must first get frontmatter added to line 1 
 
 - After moving, add the organize marker: `> 整理自 Inbox，<YYYY-MM-DD that day>`.
   - Insert it after the frontmatter's closing `---`; if there is no frontmatter, add one per the spec above first, then insert the marker.
-  - The marker format is `> 整理自 Inbox，<YYYY-MM-DD that day>` — nothing more. Do not add `原始文件` self-pointing wikilinks; after `git mv` the file is its own canonical copy, and the source file (if any) is already recorded in frontmatter `source_file`.
+  - The marker format is `> 整理自 Inbox，<YYYY-MM-DD that day>` — nothing more. Do not add `原始文件` self-pointing wikilinks for the Markdown note itself; after `git mv` the Markdown file is its own canonical copy.
+  - For notes converted from non-Markdown source files such as PDFs, Word files, screenshots, audio/video, CSV, HTML, EPUB, or Notebook files, set frontmatter `source_file: "source/<organized Markdown stem>.<original extension>"` and add a separate visible line after the marker: `Original file: [[source/<organized Markdown stem>.<original extension>]]`. The link text must match the actual file under the lowercase `source/` directory and the source file must exist. Frontmatter `source_file` is metadata only; it does not replace the user-visible link.
+  - For `Inbox/*.md` source notes, do not add an `原始文件：[[...]]` line and do not set `source_file` to the Markdown file itself. After `git mv`, the Markdown note is already the canonical content note. If it has a web/article source, record that as `source_url` / `canonical_url` instead.
 - If the frontmatter has `status: inbox`, change it per the target directory to `active` (`Projects/` / `Areas/`) or `archived` (`Archive/`); `Resources/` notes may omit `status`, do not write `resource`.
 - Notes entering `Resources/` must be distilled: if the body is mostly original text, transcript, long excerpts, or over ~3000 characters, prepend `## 提炼` containing a one-sentence judgment, 3-7 key points, the use and next step for current `Areas/` / `Projects/`; evidence content stays under `## 原文 / 摘录` by default.
 - Converted notes entering `Projects/`, `Areas/`, `Archive/` must also get minimal distillation: at least a one-sentence judgment, key content/technical points, the organize conclusion, and the original/excerpt or evidence source.
@@ -152,7 +145,9 @@ A converted note without frontmatter must first get frontmatter added to line 1 
 
 ### 8. Move and stage
 
-Fixed flow: `mkdir -p <target dir>` if needed → `git add <original Inbox file>` (track the new note first) → `git mv <original> <target>` → Edit the organized content → `git add <target>`. In headless / allowlist-restricted environments, use `.claude/bin/safe-mkdir`, `.claude/bin/safe-git-add`, `.claude/bin/safe-git-mv`, and `.claude/bin/safe-git-commit` instead of direct `mkdir` / `git add` / `git mv` / `git commit`.
+Fixed flow: create the target dir if needed → `git add <original Inbox file>` (track the new note first) → `git mv <original> <target>` → Edit the organized content → `git add <target>`. In headless / allowlist-restricted environments, use `.claude/bin/safe-mkdir`, `.claude/bin/safe-git-add`, `.claude/bin/safe-git-mv`, and `.claude/bin/safe-git-commit` on macOS / Linux; use the matching `.cmd` wrappers on Windows.
+
+For converted non-Markdown sources, the fixed flow has one additional source step before final editing: create `<target dir>/source/`, then `git mv "Inbox/<original source filename>" "<target dir>/source/<organized Markdown stem><original extension>"`. The organized Markdown note and the original source file must never share the same directory level. After editing, `git add` both the organized Markdown note and the normalized source file path.
 
 Forbidden:
 
@@ -169,10 +164,11 @@ If you must undo this run's moves before committing, use only the reverse `git m
 When this run's target is `Resources/<topic>/`, after moving and editing, run the script to update that topic README's resource-index section:
 
 ```bash
-python3 .claude/skills/optimize-vault/scripts/generate_resource_index.py --dir "Resources/<topic>"
+<python> .claude/skills/optimize-vault/scripts/generate_resource_index.py --dir "Resources/<topic>"
 ```
 
 - The script only updates the content between `<!-- BEGIN: resource-index -->` and `<!-- END: resource-index -->` in the topic `README.md`; nothing outside the markers is touched.
+- Use the platform's Python launcher for `<python>`: usually `python3` on macOS / Linux, and `py -3` or `python` on Windows.
 - When the topic directory has no README or the README has no marker block, the script skips and reports — do not create a README just to update the index; topic README creation is the responsibility of the optimize-vault "topic-index gap" check.
 - After updating, `git add "Resources/<topic>/README.md"`.
 - This step applies only to `Resources/` targets; `Projects/` / `Areas/` / `Archive/` are not involved.
@@ -195,7 +191,7 @@ If anything is unsatisfied, do not commit; undo safely if possible, otherwise st
 - After a normal commit run `git log -1 --format=%H`; the `commit:` field may only use the hash just output, never from memory or historical logs.
 - Before writing the log, Read the full `.claude/organize.log`; if it does not exist, create an empty log first, then Write back "old content + new entry" — never overwrite and lose history.
 - When there are Inbox files but all are retained / nothing to organize this run: do not commit, still append a full log entry, `commit: 无`.
-- When Inbox is empty: do not commit, do not take a hash, append a single line `## <YYYY-MM-DD HH:MM> <auto|manual> — Inbox 为空，无需整理`. `organize.sh` may use a shell append for the empty-Inbox branch without launching Claude.
+- When Inbox is empty: do not commit, do not take a hash, append a single line `## <YYYY-MM-DD HH:MM> <auto|manual> — Inbox 为空，无需整理`. The offline organizer may append this directly without launching Claude.
 
 Log format:
 

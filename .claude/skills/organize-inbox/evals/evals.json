@@ -3,130 +3,169 @@
   "evals": [
     {
       "id": 0,
-      "prompt": "Organize Inbox in a temporary brain vault. Scenario: Areas/AI Native Transformation.md already has user uncommitted changes; Inbox/AI Native Team Adoption Material.md clearly needs to update this Area supporting note. After organizing, the dirty supporting note should be protected.",
-      "expected_output": "The Inbox file is not moved or committed; Areas/AI Native Transformation.md stays uncommitted and unstaged; the log appends commit: none and notes the supporting note has uncommitted changes.",
+      "prompt": "在一个临时 brain vault 中整理 Inbox。场景：Areas/AI Native 转型.md 已有用户未提交改动；Inbox/AI Native 团队落地资料.md 明显需要更新这个 Area 承接。执行整理后应保护 dirty 承接笔记。",
+      "expected_output": "Inbox 文件不移动、不提交；Areas/AI Native 转型.md 保持未提交且未被暂存；日志追加 commit: 无，并说明承接笔记已有未提交改动。",
       "files": [],
       "expectations": [
-        "Record pre-organize non-Inbox dirty paths and treat Areas/AI Native Transformation.md as a protected path.",
-        "Inbox/AI Native Team Adoption Material.md is not moved and no organize commit is created.",
-        "The user's existing changes to Areas/AI Native Transformation.md are not staged or committed.",
-        ".claude/organize.log appends commit: none and notes the supporting note has uncommitted changes."
+        "记录整理前非 Inbox dirty paths，并把 Areas/AI Native 转型.md 当作 protected path。",
+        "没有移动 Inbox/AI Native 团队落地资料.md，也没有创建整理 commit。",
+        "没有暂存或提交 Areas/AI Native 转型.md 的用户既有改动。",
+        ".claude/organize.log 追加了 commit: 无，并说明承接笔记已有未提交改动。"
       ]
     },
     {
       "id": 1,
-      "prompt": "Organize Inbox in a temporary brain vault. Scenario: Inbox/photo.png is a screenshot. Organizing should first generate Inbox/photo.md, then follow the Markdown flow to classify, distill, add supporting notes, move, stage, commit, and log using the original screenshot content; if the screenshot is unreadable or lacks information, the original stays in Inbox with a clear reason.",
-      "expected_output": "photo.png produces photo.md via safe-markitdown; what gets organized is the Markdown supplemented with the screenshot's topic and key information, keeping the original image reference; do not submit only the screenshot placeholder template.",
+      "prompt": "在一个临时 brain vault 中整理 Inbox。场景：Inbox/photo.png 是一张截图。执行整理时应先生成 Inbox/photo.md，再结合原始截图内容按 Markdown 流程分类、提炼、承接、移动、暂存、提交和写日志；如果截图不可读或信息不足，则原图留在 Inbox 并写清原因。",
+      "expected_output": "photo.png 经 safe-markitdown 生成 photo.md；整理的是补充了截图主题和关键信息的 Markdown，保留原始图片引用；不能只提交截图占位模板。",
       "files": [],
       "expectations": [
-        "Run organize_inbox.py prepare first, and have the script call .claude/bin/safe-markitdown on Inbox/photo.png instead of leaving it as an unsupported type.",
-        "After conversion, Read the generated Inbox/photo.md and supplement topic, key information, and follow-up actions from the original screenshot.",
-        "The organized Markdown contains the organize marker, original image reference, necessary distillation, and 1-3 related wikilinks.",
-        "When the screenshot is unreadable, output is empty, content is unreadable, or information is insufficient, photo.png stays in Inbox and no empty-shell photo.md is committed.",
-        ".claude/organize.log records the move result or retention reason, and the commit hash comes only from the just-completed commit."
+        "先运行 organize_inbox.py prepare，并由脚本对 Inbox/photo.png 调用 .claude/bin/safe-markitdown，而不是当作不支持类型留存。",
+        "转换成功后 Read 生成的 Inbox/photo.md，并结合原始截图内容补充主题、关键信息和后续动作。",
+        "整理后的 Markdown 包含整理标记、原始图片引用、必要提炼和 1-3 个相关双链。",
+        "截图不可读、输出为空、内容不可读或信息不足时，photo.png 留在 Inbox，没有提交空壳 photo.md。",
+        ".claude/organize.log 记录移动结果或留存原因，commit hash 只来自刚完成的提交。"
       ]
     },
     {
       "id": 2,
-      "prompt": "Organize Inbox in a temporary brain vault. Scenario: Inbox/report.pdf and Inbox/report.md have a same-name conflict, and it cannot be confirmed that report.md is the corresponding content note. After organizing, report.md must not be overwritten, and no self-generated dedup copy may be created.",
-      "expected_output": "Both report.pdf and report.md stay in Inbox; report.md's original content is unchanged; no organize commit is created; the log appends commit: none and notes the same-name Markdown conflict needs manual handling.",
+      "prompt": "在一个临时 brain vault 中整理 Inbox。场景：Inbox/report.pdf 与 Inbox/report.md 同名冲突，无法确认 report.md 是对应内容笔记。执行整理后不能覆盖 report.md，也不能自行生成去重副本。",
+      "expected_output": "report.pdf 和 report.md 都留在 Inbox；report.md 原内容不变；没有整理 commit；日志追加 commit: 无，并说明同名 Markdown 冲突需人工处理。",
       "files": [],
       "expectations": [
-        "report.pdf stays in Inbox and report.md's original content is not overwritten.",
-        "No report-1.md or other dedup Markdown copy is generated.",
-        "No organize commit is created.",
-        ".claude/organize.log appends commit: none and notes the same-name Markdown conflict."
+        "report.pdf 留在 Inbox，report.md 原内容未被覆盖。",
+        "没有生成 report-1.md 或其他去重 Markdown 副本。",
+        "没有创建整理 commit。",
+        ".claude/organize.log 追加了 commit: 无，并说明同名 Markdown 冲突。"
       ]
     },
     {
       "id": 3,
-      "prompt": "Organize Inbox in a temporary brain vault. Scenario: there is an unrelated dirty file Areas/AI Native Transformation.md; Inbox/Standalone Tool Reference.md is Rust CLI reference material that does not need to update the dirty Area, but after entering Resources it should have a new Area supporting note.",
-      "expected_output": "Standalone Tool Reference is organized into Resources; a non-protected supporting Area is created or updated; the commit contains only the organized files and supporting note; the original dirty Area remains uncommitted and unstaged; the log hash is verifiable.",
+      "prompt": "在一个临时 brain vault 中整理 Inbox。场景：存在无关 dirty 文件 Areas/AI Native 转型.md；Inbox/独立工具资料.md 是 Rust CLI 参考资料，不需要更新 dirty Area，但进入 Resources 后应有新的 Area 承接。",
+      "expected_output": "独立工具资料被整理到 Resources；新建或更新非 protected 的承接 Area；提交只包含整理文件与承接笔记；原 dirty Area 仍未提交且未暂存；日志 hash 可验证。",
       "files": [],
       "expectations": [
-        "Inbox/Standalone Tool Reference.md is moved to a topic directory under Resources.",
-        "A non-protected Area/Project supporting note is created or updated and cross-linked with the resource note.",
-        "The organize commit does not include the existing dirty changes to Areas/AI Native Transformation.md.",
-        "The script exits successfully and Areas/AI Native Transformation.md is still an uncommitted change.",
-        "The commit hash in .claude/organize.log equals the latest commit and is git-verifiable."
+        "Inbox/独立工具资料.md 被移动到 Resources 下的主题目录。",
+        "创建或更新了非 protected 的 Area/Project 承接笔记，并与资源笔记互链。",
+        "整理 commit 不包含 Areas/AI Native 转型.md 的既有 dirty 改动。",
+        "脚本成功退出，Areas/AI Native 转型.md 仍是未提交改动。",
+        ".claude/organize.log 的 commit hash 等于最新提交且 git 可验证。"
       ]
     },
     {
       "id": 4,
-      "prompt": "Organize Inbox in a temporary brain vault. Scenario: Inbox/meeting.mp3 is a meeting audio note. Organizing should first transcribe it to Inbox/meeting.md, then follow the Markdown flow to classify, distill, add supporting notes, move, stage, commit, and log; if Whisper transcription fails, the audio stays in Inbox with a clear reason.",
-      "expected_output": "meeting.mp3 first produces meeting.md via safe-markitdown; on successful transcription what gets organized is meeting.md keeping the original audio reference, and the original audio may move with the note to the same target or Sources; on transcription failure the original audio is not moved and no empty-shell Markdown is committed, and the log states the transcription failure reason.",
+      "prompt": "在一个临时 brain vault 中整理 Inbox。场景：Inbox/meeting.mp3 是一条会议音频笔记。执行整理时应先转写为 Inbox/meeting.md，再按 Markdown 流程分类、提炼、承接、移动、暂存、提交和写日志；如果 Whisper 转写失败，则音频留在 Inbox 并写清原因。",
+      "expected_output": "meeting.mp3 先经 safe-markitdown 生成 meeting.md；转写成功时整理的是 meeting.md 且保留原始音频引用，原始音频可随笔记移动到同一目标或 Sources；转写失败时不移动原音频、不提交空壳 Markdown，日志写明转写失败原因。",
       "files": [],
       "expectations": [
-        "Call .claude/bin/safe-markitdown on Inbox/meeting.mp3 instead of moving the audio directly.",
-        "After transcription, Read the generated Inbox/meeting.md and treat that Markdown as the object to organize.",
-        "The organized Markdown contains the organize marker, original audio reference, necessary distillation, and 1-3 related wikilinks.",
-        "When transcription fails, output is empty, or content is unreadable, meeting.mp3 stays in Inbox and no empty-shell meeting.md is committed.",
-        ".claude/organize.log records the move result or retention reason, and the commit hash comes only from the just-completed commit."
+        "对 Inbox/meeting.mp3 调用 .claude/bin/safe-markitdown，而不是直接移动音频。",
+        "转写成功后 Read 生成的 Inbox/meeting.md，并把该 Markdown 作为后续整理对象。",
+        "整理后的 Markdown 包含整理标记、原始音频引用、必要提炼和 1-3 个相关双链。",
+        "转写失败、输出为空或内容不可读时，meeting.mp3 留在 Inbox，没有提交空壳 meeting.md。",
+        ".claude/organize.log 记录移动结果或留存原因，commit hash 只来自刚完成的提交。"
       ]
     },
     {
       "id": 5,
-      "prompt": "Organize Inbox in a temporary brain vault. Scenario: Inbox/export.csv is an AI tool evaluation data export. Organizing should first convert it to Inbox/export.md, then follow the Markdown flow to classify, distill, add supporting notes, move, stage, commit, and log.",
-      "expected_output": "export.csv produces export.md via safe-markitdown; what gets organized is the converted Markdown keeping the original CSV reference; on entering Resources it completes distillation and Area/Project supporting notes.",
+      "prompt": "在一个临时 brain vault 中整理 Inbox。场景：Inbox/export.csv 是一份 AI 工具评估数据导出。执行整理时应先转换为 Inbox/export.md，再按 Markdown 流程分类、提炼、承接、移动、暂存、提交和写日志。",
+      "expected_output": "export.csv 经 safe-markitdown 生成 export.md；整理的是转换后的 Markdown，保留原始 CSV 引用；进入 Resources 时完成提炼和 Area/Project 承接。",
       "files": [],
       "expectations": [
-        "Call .claude/bin/safe-markitdown on Inbox/export.csv instead of leaving it as an unsupported type.",
-        "After conversion, Read the generated Inbox/export.md and treat that Markdown as the object to organize.",
-        "The organized Markdown contains the organize marker, original CSV reference, necessary distillation, and 1-3 related wikilinks.",
-        "When conversion fails, output is empty, or content is unreadable, export.csv stays in Inbox and no empty-shell export.md is committed.",
-        ".claude/organize.log records the move result or retention reason, and the commit hash comes only from the just-completed commit."
+        "对 Inbox/export.csv 调用 .claude/bin/safe-markitdown，而不是当作不支持类型留存。",
+        "转换成功后 Read 生成的 Inbox/export.md，并把该 Markdown 作为后续整理对象。",
+        "整理后的 Markdown 包含整理标记、原始 CSV 引用、必要提炼和 1-3 个相关双链。",
+        "转换失败、输出为空或内容不可读时，export.csv 留在 Inbox，没有提交空壳 export.md。",
+        ".claude/organize.log 记录移动结果或留存原因，commit hash 只来自刚完成的提交。"
       ]
     },
     {
       "id": 6,
-      "prompt": "Organize Inbox in a temporary brain vault. Scenario: Inbox/article.html is a web page export and Inbox/experiment.ipynb is an AI experiment Notebook. Both should first be converted to Markdown when organizing, then follow the Markdown flow to classify, distill, add supporting notes, move, stage, commit, and log.",
-      "expected_output": "Both article.html and experiment.ipynb produce same-name Markdown via safe-markitdown; on successful conversion organize the Markdown keeping the original file references; on conversion failure the original files stay in Inbox with a clear reason.",
+      "prompt": "在一个临时 brain vault 中整理 Inbox。场景：Inbox/article.html 是一篇网页资料导出，Inbox/experiment.ipynb 是一个 AI 实验 Notebook。执行整理时二者都应先转换为 Markdown，再按 Markdown 流程分类、提炼、承接、移动、暂存、提交和写日志。",
+      "expected_output": "article.html 和 experiment.ipynb 都经 safe-markitdown 生成同名 Markdown；转换成功时整理 Markdown 并保留原始文件引用；转换失败时原文件留在 Inbox 并写清原因。",
       "files": [],
       "expectations": [
-        "Call .claude/bin/safe-markitdown on Inbox/article.html and Inbox/experiment.ipynb instead of leaving them as unsupported types.",
-        "After conversion, Read the generated same-name Markdown and treat it as the object to organize.",
-        "The organized Markdown contains the organize marker, original file reference, necessary distillation, and 1-3 related wikilinks.",
-        "Pass the supporting-note gate before entering Resources or Archive, creating or updating Area/Project supporting notes when needed.",
-        "When conversion fails, output is empty, or content is unreadable, the original files stay in Inbox and no empty-shell Markdown is committed."
+        "对 Inbox/article.html 和 Inbox/experiment.ipynb 调用 .claude/bin/safe-markitdown，而不是当作不支持类型留存。",
+        "转换成功后 Read 生成的同名 Markdown，并把 Markdown 作为后续整理对象。",
+        "整理后的 Markdown 包含整理标记、原始文件引用、必要提炼和 1-3 个相关双链。",
+        "进入 Resources 或 Archive 前通过承接门禁，必要时创建或更新 Area/Project 承接笔记。",
+        "转换失败、输出为空或内容不可读时，原文件留在 Inbox，没有提交空壳 Markdown。"
       ]
     },
     {
       "id": 7,
-      "prompt": "Organize Inbox in a temporary brain vault. Scenario: Inbox/whiteboard.jpeg is a whiteboard photo. Organizing should first generate Inbox/whiteboard.md, then follow the Markdown flow to classify, distill, add supporting notes, move, stage, commit, and log using the original screenshot content.",
-      "expected_output": "whiteboard.jpeg produces whiteboard.md via safe-markitdown; the organized Markdown is not just a placeholder template but includes distillation of the whiteboard photo's topic, key points, and next steps, keeping the original JPEG reference.",
+      "prompt": "在一个临时 brain vault 中整理 Inbox。场景：Inbox/whiteboard.jpeg 是一张白板截图。执行整理时应先生成 Inbox/whiteboard.md，再结合原始截图内容按 Markdown 流程分类、提炼、承接、移动、暂存、提交和写日志。",
+      "expected_output": "whiteboard.jpeg 经 safe-markitdown 生成 whiteboard.md；整理后的 Markdown 不只是占位模板，而是包含对白板截图的主题、关键点和下一步提炼，并保留原始 JPEG 引用。",
       "files": [],
       "expectations": [
-        "Call .claude/bin/safe-markitdown on Inbox/whiteboard.jpeg instead of leaving it as an unsupported type.",
-        "After conversion, Read the generated Inbox/whiteboard.md and supplement topic, key information, and follow-up actions from the original screenshot.",
-        "The organized Markdown contains the organize marker, original image reference, necessary distillation, and 1-3 related wikilinks.",
-        "Pass the supporting-note gate before entering Resources or Archive, creating or updating Area/Project supporting notes when needed.",
-        "When the screenshot is unreadable, output is empty, content is unreadable, or information is insufficient, the original file stays in Inbox and no empty-shell Markdown is committed."
+        "对 Inbox/whiteboard.jpeg 调用 .claude/bin/safe-markitdown，而不是当作不支持类型留存。",
+        "转换成功后 Read 生成的 Inbox/whiteboard.md，并结合原始截图内容补充主题、关键信息和后续动作。",
+        "整理后的 Markdown 包含整理标记、原始图片引用、必要提炼和 1-3 个相关双链。",
+        "进入 Resources 或 Archive 前通过承接门禁，必要时创建或更新 Area/Project 承接笔记。",
+        "截图不可读、输出为空、内容不可读或信息不足时，原文件留在 Inbox，没有提交空壳 Markdown。"
       ]
     },
     {
       "id": 8,
-      "prompt": "Organize Inbox in a temporary brain vault. Scenario: Resources/Loop Engineering/Existing Article.md already has source_url and content_fingerprint; the next day Inbox/existing-copy.md appears with a source URL or body fingerprint identical to the existing note.",
-      "expected_output": "existing-copy.md is not organized into a new Resource; keep the existing canonical note, move the duplicate Inbox file to Archive/Duplicates/, and write canonical, duplication evidence, and organize date at the top of the duplicate file; the log records the duplicate handling.",
+      "prompt": "在一个临时 brain vault 中整理 Inbox。场景：Resources/Loop Engineering/Existing Article.md 已有 source_url 和 content_fingerprint；第二天又出现 Inbox/existing-copy.md，来源 URL 或正文指纹与已有笔记完全一致。",
+      "expected_output": "existing-copy.md 不再整理成新的 Resource；保留已有 canonical 笔记，把重复 Inbox 文件移动到 Archive/Duplicates/，并在重复文件开头写明 canonical、重复依据和整理日期；日志记录重复处理。",
       "files": [],
       "expectations": [
-        "Run organize_inbox.py prepare or apply-duplicates first, having the script extract Inbox/existing-copy.md's source URL and content_fingerprint and search Projects/Areas/Resources/Archive.",
-        "When the script matches an existing source_url, canonical_url, or content_fingerprint, it is judged an exact duplicate.",
-        "No new Resources material note is created and no unrelated supporting note is updated.",
-        "The duplicate file is moved via git mv to Archive/Duplicates/ or its topic subdirectory, and the file content states canonical and duplication evidence.",
-        ".claude/organize.log records the duplicate handling result, and the commit hash comes only from the just-completed commit."
+        "先运行 organize_inbox.py prepare 或 apply-duplicates，由脚本提取 Inbox/existing-copy.md 的来源 URL 和 content_fingerprint，并搜索 Projects/Areas/Resources/Archive。",
+        "脚本命中已有 source_url、canonical_url 或 content_fingerprint 时，判定为完全重复。",
+        "没有创建新的 Resources 资料笔记，也没有更新 unrelated 承接笔记。",
+        "重复文件通过 git mv 移动到 Archive/Duplicates/ 或其主题子目录，文件内容写明 canonical 与重复依据。",
+        ".claude/organize.log 记录重复处理结果，commit hash 只来自刚完成的提交。"
       ]
     },
     {
       "id": 9,
-      "prompt": "Organize Inbox in a temporary brain vault. Scenario: Inbox/loop-practice.md and the existing Resources/Loop Engineering/theory.md both belong to the Loop Engineering topic, with similar titles and keywords, but different source URLs and different body fingerprints.",
-      "expected_output": "loop-practice.md should not be treated as an exact duplicate; it should be organized into Resources as independent material, add possibly-related wikilinks, and update the corresponding Area/Project supporting note.",
+      "prompt": "在一个临时 brain vault 中整理 Inbox。场景：Inbox/loop-practice.md 与已有 Resources/Loop Engineering/theory.md 同属 Loop Engineering 主题，标题和关键词相近，但来源 URL 不同且正文指纹不同。",
+      "expected_output": "loop-practice.md 不应被当作完全重复；它应作为独立资料整理到 Resources，补充可能相关双链，并更新对应 Area/Project 承接笔记。",
       "files": [],
       "expectations": [
-        "The script generates loop-practice.md's content_fingerprint before classification and compares it with existing notes.",
-        "Only topic/title similarity with different URL and fingerprint does not auto-archive as duplicate.",
-        "loop-practice.md enters Resources as independent material and writes source_url (if any) and content_fingerprint.",
-        "The organized content adds a possibly-related [[theory]] wikilink or a relation note.",
-        "Update the non-protected Area/Project supporting note per the supporting-note gate."
+        "脚本分类前生成 loop-practice.md 的 content_fingerprint，并与已有笔记比较。",
+        "只有主题/标题相似、URL 和指纹不同，不自动归档为重复。",
+        "loop-practice.md 作为独立资料进入 Resources，并写入 source_url（若有）和 content_fingerprint。",
+        "整理内容补充可能相关的 [[theory]] 双链或关联说明。",
+        "按承接门禁更新非 protected 的 Area/Project 承接笔记。"
+      ]
+    },
+    {
+      "id": 10,
+      "prompt": "在一个临时 brain vault 中整理 Inbox。场景：Inbox/paper.pdf 经 canonical prepare 已成功生成 Inbox/paper.md，但 Markdown 里有 PDF 双栏/表格造成的版面噪声。执行整理时应继续基于 paper.md 提炼，或在信息不足时留在 Inbox。",
+      "expected_output": "PDF 自动转换只经过 .claude/bin/safe-markitdown；不能为了获得更干净文本再调用 pdftotext、pdfplumber、pypdf、OCR 或手写 Python PDF 抽取。若 paper.md 可用，则整理 Markdown，并把原始 PDF 放到目标 note 同级 lowercase source/ 目录且改成整理后 Markdown 同 stem；若 paper.md 不可用，则 PDF 留在 Inbox 并写清原因。",
+      "files": [],
+      "expectations": [
+        "先运行 organize_inbox.py prepare，并由脚本对 Inbox/paper.pdf 调用 .claude/bin/safe-markitdown。",
+        "转换成功后 Read 生成的 Inbox/paper.md，并把该 Markdown 作为后续整理对象。",
+        "不调用 pdftotext、pdfplumber、pypdf、OCR 工具、通用 PDF skill 或 ad hoc Python PDF 抽取作为二次转换/兜底。",
+        "paper.md 虽有版面噪声但信息足够时，从该 Markdown 和脚本报告中提炼，不绕过 wrapper 生成另一份文本。",
+        "paper.md 为空、乱码或信息不足时，paper.pdf 留在 Inbox，没有提交空壳 Markdown，并在 .claude/organize.log 写明原因。"
+      ]
+    },
+    {
+      "id": 11,
+      "prompt": "在一个临时 brain vault 中整理 Inbox。场景：Inbox/2606.30317v1.pdf 成功转换成 Markdown，并被整理为 Resources/Agent Platforms/MCP Server Architecture Patterns for LLM-Integrated Applications.md。原始 PDF 文件名是下载编号，不适合长期阅读。",
+      "expected_output": "原始 PDF 跟随整理稿进入目标 note 同级 lowercase source/ 目录，并改成整理后 Markdown 同 stem 的 PDF；整理后的 Markdown frontmatter 写入 source_file，并在正文整理标记后单独添加可点击的 Original file wikilink；不能只在 frontmatter 里写 source_file。",
+      "files": [],
+      "expectations": [
+        "PDF 通过 git mv 移动到 Resources/Agent Platforms/source/MCP Server Architecture Patterns for LLM-Integrated Applications.pdf；不能放在 topic 根目录、Sources/ 或保留下载编号。",
+        "Markdown frontmatter 的 source_file 指向 source/MCP Server Architecture Patterns for LLM-Integrated Applications.pdf。",
+        "整理标记保持精确格式 > 整理自 Inbox，<date>，不要把原始文件信息塞进同一行。",
+        "整理标记后有单独一行 Original file: [[source/MCP Server Architecture Patterns for LLM-Integrated Applications.pdf]]，且该 PDF 文件实际存在。",
+        "不能只依赖 source_file 元数据；用户在 Obsidian 正文中必须能直接点击打开原始 PDF。"
+      ]
+    },
+    {
+      "id": 12,
+      "prompt": "在一个临时 brain vault 中整理 Inbox。场景：Inbox/article.md 是已经存在的 Markdown clipping，frontmatter 里有 source_url。执行整理时应直接移动并整理这个 Markdown 内容笔记。",
+      "expected_output": "article.md 整理后只保留规范 frontmatter、整理标记、提炼和必要 wikilink；不添加 原始文件：[[article.md]] 这类自链，也不把 source_file 设置为 article.md。原文来源用 source_url/canonical_url 表达。",
+      "files": [],
+      "expectations": [
+        "Inbox/article.md 作为 Markdown 直接 Read 后整理，不调用 safe-markitdown。",
+        "移动后的 Markdown 有整理标记 > 整理自 Inbox，<date>。",
+        "正文中没有 原始文件：[[article.md]]、原始文件：[[<整理后文件名>.md]] 或其他指向自身 Markdown 的原始文件链接。",
+        "frontmatter 不设置 source_file: article.md，也不设置 source_file 为整理后的 Markdown 自身。",
+        "若原 Markdown 有可确认网页来源，使用 source_url 或 canonical_url 记录来源。"
       ]
     }
   ]
