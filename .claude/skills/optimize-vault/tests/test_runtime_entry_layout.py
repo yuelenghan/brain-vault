@@ -25,7 +25,7 @@ IGNORED_GENERATED_PATHS = (
     ".skill-workspaces/agents/optimize-vault-workspace/output.txt",
 )
 WHITELISTED_RUNTIME_PATHS = (
-    ".claude/organize.sh",
+    ".claude/ingest.sh",
     ".claude/bin/safe-markitdown",
     ".claude/skills/optimize-vault/SKILL.md",
     ".agents/skills/optimize-vault/SKILL.md",

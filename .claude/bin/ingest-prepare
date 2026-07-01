@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the organize-inbox scanner with fixed report paths."""
+"""Run ingest prepare with fixed report paths."""
 
 from __future__ import annotations
 
@@ -9,22 +9,22 @@ import tempfile
 from pathlib import Path
 
 
-SCRIPT = Path(".claude/skills/organize-inbox/scripts/organize_inbox.py")
+SCRIPT = Path(".claude/skills/ingest/scripts/ingest.py")
 REPORT_DIR = Path(tempfile.gettempdir()).resolve()
-JSON_REPORT = REPORT_DIR / "organize-inbox.json"
-MARKDOWN_REPORT = REPORT_DIR / "organize-inbox.md"
+JSON_REPORT = REPORT_DIR / "ingest.json"
+MARKDOWN_REPORT = REPORT_DIR / "ingest.md"
 
 
 def main(argv: list[str]) -> int:
     if argv:
-        print("organize-inbox-scan: arguments are not allowed", file=sys.stderr)
+        print("ingest-prepare: arguments are not allowed", file=sys.stderr)
         return 2
     return subprocess.run(
         [
             sys.executable,
             str(SCRIPT),
             "--mode",
-            "scan",
+            "prepare",
             "--json",
             str(JSON_REPORT),
             "--markdown",

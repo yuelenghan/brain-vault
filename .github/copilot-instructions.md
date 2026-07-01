@@ -37,9 +37,9 @@ This repository is a personal knowledge vault template, not an application codeb
 - `Pillow` is optional and lets `.claude/bin/safe-markitdown` create screenshot placeholder Markdown for `.png/.jpg/.jpeg/.webp`.
 - `whisper` is optional and transcribes `.mp3/.m4a/.wav/.mp4/.mov/.aac/.aiff/.flac/.ogg/.opus/.webm` through `.claude/bin/safe-whisper`.
 - Cloning this repository does not install these tools.
-- Claude Code skills: `/organize-inbox` handles new Inbox material; `/optimize-vault` handles already organized notes only.
-- Copilot CLI plugin skills live in `.copilot/skills/setup-brain`, `.copilot/skills/organize-inbox`, and `.copilot/skills/optimize-vault`, with manifest `.copilot/.github/plugin/plugin.json`; each reads the matching `.claude/skills/*/SKILL.md` as the canonical workflow.
-- Codex CLI project skills live in `.codex/skills/setup-brain`, `.codex/skills/organize-inbox`, and `.codex/skills/optimize-vault`; each reads the matching `.claude/skills/*/SKILL.md` as the canonical workflow.
+- Claude Code skills: `/ingest` handles new Inbox material; `/optimize-vault` handles already organized notes only.
+- Copilot CLI plugin skills live in `.copilot/skills/setup-brain`, `.copilot/skills/ingest`, and `.copilot/skills/optimize-vault`, with manifest `.copilot/.github/plugin/plugin.json`; each reads the matching `.claude/skills/*/SKILL.md` as the canonical workflow.
+- Codex CLI project skills live in `.codex/skills/setup-brain`, `.codex/skills/ingest`, and `.codex/skills/optimize-vault`; each reads the matching `.claude/skills/*/SKILL.md` as the canonical workflow.
 
 ## Working style
 

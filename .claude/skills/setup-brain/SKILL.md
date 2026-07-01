@@ -75,14 +75,14 @@ Resources/
 Archive/
 .claude/bin/
 .claude/skills/setup-brain/
-.claude/skills/organize-inbox/
+.claude/skills/ingest/
 .claude/skills/optimize-vault/
 .codex/skills/setup-brain/
-.codex/skills/organize-inbox/
+.codex/skills/ingest/
 .codex/skills/optimize-vault/
 .copilot/.github/plugin/
 .copilot/skills/setup-brain/
-.copilot/skills/organize-inbox/
+.copilot/skills/ingest/
 .copilot/skills/optimize-vault/
 .github/
 ```
@@ -188,7 +188,7 @@ If the user enables Codex CLI support:
 
 ### 6. Wrapper check
 
-Confirm the wrapper files exist. On macOS / Linux, the extensionless wrappers and `.claude/organize.sh` should also be executable:
+Confirm the wrapper files exist. On macOS / Linux, the extensionless wrappers and `.claude/ingest.sh` should also be executable:
 
 ```bash
 test -x .claude/bin/safe-markitdown
@@ -197,15 +197,15 @@ test -x .claude/bin/safe-mkdir
 test -x .claude/bin/safe-git-add
 test -x .claude/bin/safe-git-mv
 test -x .claude/bin/safe-git-commit
-test -x .claude/bin/organize-inbox-scan
-test -x .claude/bin/organize-inbox-prepare
-test -x .claude/bin/organize-inbox-apply-duplicates
+test -x .claude/bin/ingest-scan
+test -x .claude/bin/ingest-prepare
+test -x .claude/bin/ingest-apply-duplicates
 ```
 
 If not executable, run:
 
 ```bash
-chmod +x .claude/bin/safe-markitdown .claude/bin/safe-whisper .claude/bin/safe-mkdir .claude/bin/safe-git-add .claude/bin/safe-git-mv .claude/bin/safe-git-commit .claude/bin/organize-inbox-scan .claude/bin/organize-inbox-prepare .claude/bin/organize-inbox-apply-duplicates .claude/organize.sh .claude/organize.py
+chmod +x .claude/bin/safe-markitdown .claude/bin/safe-whisper .claude/bin/safe-mkdir .claude/bin/safe-git-add .claude/bin/safe-git-mv .claude/bin/safe-git-commit .claude/bin/ingest-scan .claude/bin/ingest-prepare .claude/bin/ingest-apply-duplicates .claude/ingest.sh .claude/ingest.py
 ```
 
 On Windows PowerShell, confirm the `.cmd` wrappers and PowerShell entry exist:
@@ -217,24 +217,24 @@ Test-Path .\.claude\bin\safe-mkdir.cmd
 Test-Path .\.claude\bin\safe-git-add.cmd
 Test-Path .\.claude\bin\safe-git-mv.cmd
 Test-Path .\.claude\bin\safe-git-commit.cmd
-Test-Path .\.claude\bin\organize-inbox-scan.cmd
-Test-Path .\.claude\bin\organize-inbox-prepare.cmd
-Test-Path .\.claude\bin\organize-inbox-apply-duplicates.cmd
-Test-Path .\.claude\organize.ps1
+Test-Path .\.claude\bin\ingest-scan.cmd
+Test-Path .\.claude\bin\ingest-prepare.cmd
+Test-Path .\.claude\bin\ingest-apply-duplicates.cmd
+Test-Path .\.claude\ingest.ps1
 ```
 
 Run syntax checks on macOS / Linux:
 
 ```bash
-python3 -m py_compile .claude/organize.py .claude/bin/safe-markitdown .claude/bin/safe-whisper .claude/bin/safe-mkdir .claude/bin/safe-git-add .claude/bin/safe-git-mv .claude/bin/safe-git-commit .claude/bin/organize-inbox-scan .claude/bin/organize-inbox-prepare .claude/bin/organize-inbox-apply-duplicates
-sh -n .claude/organize.sh
+python3 -m py_compile .claude/ingest.py .claude/bin/safe-markitdown .claude/bin/safe-whisper .claude/bin/safe-mkdir .claude/bin/safe-git-add .claude/bin/safe-git-mv .claude/bin/safe-git-commit .claude/bin/ingest-scan .claude/bin/ingest-prepare .claude/bin/ingest-apply-duplicates
+sh -n .claude/ingest.sh
 python3 -m json.tool .copilot/.github/plugin/plugin.json > "$(python3 -c 'import tempfile; print(tempfile.gettempdir())')/brain-vault-plugin-json-check.out"
 ```
 
 Run syntax checks on Windows PowerShell:
 
 ```powershell
-py -3 -m py_compile .\.claude\organize.py .\.claude\bin\safe-markitdown .\.claude\bin\safe-whisper .\.claude\bin\safe-mkdir .\.claude\bin\safe-git-add .\.claude\bin\safe-git-mv .\.claude\bin\safe-git-commit .\.claude\bin\organize-inbox-scan .\.claude\bin\organize-inbox-prepare .\.claude\bin\organize-inbox-apply-duplicates
+py -3 -m py_compile .\.claude\ingest.py .\.claude\bin\safe-markitdown .\.claude\bin\safe-whisper .\.claude\bin\safe-mkdir .\.claude\bin\safe-git-add .\.claude\bin\safe-git-mv .\.claude\bin\safe-git-commit .\.claude\bin\ingest-scan .\.claude\bin\ingest-prepare .\.claude\bin\ingest-apply-duplicates
 $out = Join-Path ([System.IO.Path]::GetTempPath()) "brain-vault-plugin-json-check.out"
 py -3 -m json.tool .\.copilot\.github\plugin\plugin.json > $out
 ```
@@ -243,9 +243,9 @@ py -3 -m json.tool .\.copilot\.github\plugin\plugin.json > $out
 
 If the user wants auto-organize, explain the three options:
 
-- In-session: use a Claude Code scheduled task to trigger `/organize-inbox`; closing the session or task expiry affects execution.
-- System-level: use crontab/launchd on macOS / Linux or Windows Task Scheduler on Windows to run the platform offline entry (`.claude/organize.sh` or `.claude/organize.ps1`).
-- Manual: periodically run `/organize-inbox`, `.claude/organize.sh`, or `.claude/organize.ps1`.
+- In-session: use a Claude Code scheduled task to trigger `/ingest`; closing the session or task expiry affects execution.
+- System-level: use crontab/launchd on macOS / Linux or Windows Task Scheduler on Windows to run the platform offline entry (`.claude/ingest.sh` or `.claude/ingest.ps1`).
+- Manual: periodically run `/ingest`, `.claude/ingest.sh`, or `.claude/ingest.ps1`.
 
 Confirm before modifying the system crontab/launchd/Task Scheduler.
 
@@ -262,4 +262,4 @@ Keep the output concise:
 - Initialized identity-layer sections.
 - Tool status: `markitdown` installed/missing, `whisper` installed/missing, `ffmpeg` installed/missing, Whisper default model/model-download reminder, `copilot` installed/missing, `codex` installed/missing.
 - Enabled capabilities: Markdown organizing, document/data/web/Notebook conversion, screenshot placeholder, audio/video transcription, organized-note optimization, Copilot CLI instructions and plugin skills, Codex/generic-agent instructions and in-project skills.
-- Next steps: put material into `Inbox/` and run `/organize-inbox`; run `/optimize-vault` when you want a health check on already-organized notes.
+- Next steps: put material into `Inbox/` and run `/ingest`; run `/optimize-vault` when you want a health check on already-organized notes.

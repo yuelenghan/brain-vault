@@ -27,8 +27,8 @@ TRACKING_PARAMS = {"fbclid", "gclid", "msclkid", "dclid", "igshid"}
 TRACKING_PREFIXES = ("utm_",)
 URL_RE = re.compile(r"https?://[^\s)\]}>\"']+")
 FIXED_REPORT_DIR = Path(tempfile.gettempdir()).resolve()
-FIXED_JSON_REPORT = FIXED_REPORT_DIR / "organize-inbox.json"
-FIXED_MARKDOWN_REPORT = FIXED_REPORT_DIR / "organize-inbox.md"
+FIXED_JSON_REPORT = FIXED_REPORT_DIR / "ingest.json"
+FIXED_MARKDOWN_REPORT = FIXED_REPORT_DIR / "ingest.md"
 
 
 @dataclass
@@ -44,7 +44,7 @@ class Candidate:
 
 
 def fail(message: str) -> int:
-    print(f"organize-inbox: {message}", file=sys.stderr)
+    print(f"ingest: {message}", file=sys.stderr)
     return 2
 
 
@@ -57,7 +57,7 @@ def git(vault: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def protected_paths(vault: Path) -> set[str]:
-    completed = git(vault, ["status", "--short", "--", ".", ":!Inbox/**", ":!.claude/organize.log"])
+    completed = git(vault, ["status", "--short", "--", ".", ":!Inbox/**", ":!.claude/ingest.log"])
     if completed.returncode != 0:
         return set()
     paths: set[str] = set()
@@ -389,7 +389,7 @@ def apply_duplicates(vault: Path, report: dict, date: str) -> None:
 
 
 def append_log(vault: Path, report: dict, date: str, mode: str) -> None:
-    path = vault / ".claude" / "organize.log"
+    path = vault / ".claude" / "ingest.log"
     path.parent.mkdir(parents=True, exist_ok=True)
     left = [c for c in report["candidates"] if c["status"] != "ready"]
     entry = [

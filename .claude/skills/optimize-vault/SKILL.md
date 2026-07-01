@@ -1,6 +1,6 @@
 ---
 name: optimize-vault
-description: Optimize already-organized Projects/Areas/Resources/Archive notes in a brain vault — handle historical duplicates, add newly-relevant wikilinks, fix broken links, find missing ownership, build topic indexes, and emit an auditable optimization report. Prefer this skill when the user mentions optimize vault, 优化 vault, deduplicate-vault, 补链, link optimization, 知识库体检, finding duplicate notes, or improving Obsidian wikilinks. Do not use it to organize Inbox; new material still goes through organize-inbox.
+description: Optimize already-organized Projects/Areas/Resources/Archive notes in a brain vault — handle historical duplicates, add newly-relevant wikilinks, fix broken links, find missing ownership, build topic indexes, and emit an auditable optimization report. Prefer this skill when the user mentions optimize vault, 优化 vault, deduplicate-vault, 补链, link optimization, 知识库体检, finding duplicate notes, or improving Obsidian wikilinks. Do not use it to organize Inbox; new material still goes through ingest.
 ---
 
 # Optimize brain vault

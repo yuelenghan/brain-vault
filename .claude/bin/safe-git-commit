@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Safe git commit wrapper for brain-vault organize work."""
+"""Safe git commit wrapper for brain-vault ingest work."""
 
 from __future__ import annotations
 

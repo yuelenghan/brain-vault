@@ -778,7 +778,7 @@ def empty_stubs(vault: Path, notes: list[Note], by_name: dict[str, list[Note]]) 
             if stub_key and stub_key in norm_name:
                 match_candidates.extend(paths)
         # For Inbox/ stubs, also check if there's a note with the same stem
-        # in a PARA directory (common after organize-inbox moves)
+        # in a PARA directory (common after ingest moves)
         if not match_candidates:
             for note in notes:
                 if Path(note.path).stem == stub_stem:

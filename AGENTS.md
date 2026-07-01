@@ -36,11 +36,11 @@ Cloning the repository does not install optional tools.
 
 ## Built-in skills
 
-- Claude Code: `.claude/skills/setup-brain`, `.claude/skills/organize-inbox`, `.claude/skills/optimize-vault`.
-- Codex app/session: project-local entries live in `.agents/skills/organize-inbox` and `.agents/skills/optimize-vault`; they read the matching `.claude/skills/*/SKILL.md` as the canonical workflow.
-- Codex CLI: project-local wrappers live in `.codex/skills/setup-brain`, `.codex/skills/organize-inbox`, `.codex/skills/optimize-vault`; they read the matching `.claude/skills/*/SKILL.md` as the canonical workflow.
-- Copilot CLI: plugin manifest is `.copilot/.github/plugin/plugin.json`; plugin skills live in `.copilot/skills/setup-brain`, `.copilot/skills/organize-inbox`, `.copilot/skills/optimize-vault` and read the matching `.claude/skills/*/SKILL.md` as the canonical workflow.
-- `/organize-inbox`: organize new materials from `Inbox/` into PARA.
+- Claude Code: `.claude/skills/setup-brain`, `.claude/skills/ingest`, `.claude/skills/optimize-vault`.
+- Codex app/session: project-local entries live in `.agents/skills/ingest` and `.agents/skills/optimize-vault`; they read the matching `.claude/skills/*/SKILL.md` as the canonical workflow.
+- Codex CLI: project-local wrappers live in `.codex/skills/setup-brain`, `.codex/skills/ingest`, `.codex/skills/optimize-vault`; they read the matching `.claude/skills/*/SKILL.md` as the canonical workflow.
+- Copilot CLI: plugin manifest is `.copilot/.github/plugin/plugin.json`; plugin skills live in `.copilot/skills/setup-brain`, `.copilot/skills/ingest`, `.copilot/skills/optimize-vault` and read the matching `.claude/skills/*/SKILL.md` as the canonical workflow.
+- `/ingest`: organize new materials from `Inbox/` into PARA.
 - `/optimize-vault`: optimize existing `Projects/`, `Areas/`, `Resources/`, and `Archive/` notes; do not use it for `Inbox/`.
 
 ## Verification
