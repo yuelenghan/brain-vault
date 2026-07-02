@@ -32,8 +32,8 @@
 !.claude/bin/safe-whisper.cmd
 !.claude/skills/
 .claude/skills/*
-!.claude/skills/optimize-vault/
-!.claude/skills/optimize-vault/**
+!.claude/skills/meditate/
+!.claude/skills/meditate/**
 !.claude/skills/ingest/
 !.claude/skills/ingest/**
 !.claude/skills/setup-brain/
@@ -42,16 +42,16 @@
 .agents/*
 !.agents/skills/
 .agents/skills/*
-!.agents/skills/optimize-vault/
-!.agents/skills/optimize-vault/**
+!.agents/skills/meditate/
+!.agents/skills/meditate/**
 !.agents/skills/ingest/
 !.agents/skills/ingest/**
 
 .codex/*
 !.codex/skills/
 .codex/skills/*
-!.codex/skills/optimize-vault/
-!.codex/skills/optimize-vault/**
+!.codex/skills/meditate/
+!.codex/skills/meditate/**
 !.codex/skills/ingest/
 !.codex/skills/ingest/**
 !.codex/skills/setup-brain/
@@ -64,8 +64,8 @@
 !.copilot/.github/plugin/plugin.json
 !.copilot/skills/
 .copilot/skills/*
-!.copilot/skills/optimize-vault/
-!.copilot/skills/optimize-vault/**
+!.copilot/skills/meditate/
+!.copilot/skills/meditate/**
 !.copilot/skills/ingest/
 !.copilot/skills/ingest/**
 !.copilot/skills/setup-brain/

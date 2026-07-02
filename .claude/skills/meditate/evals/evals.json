@@ -1,0 +1,70 @@
+{
+  "skill_name": "meditate",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "在一个临时 brain vault 中优化已整理笔记。场景：Resources/Loop Engineering/article-a.md 和 Resources/AI Agents/article-a-copy.md 有相同 source_url 与 content_fingerprint；article-a.md 提炼更完整且入链更多。请执行 meditate。",
+      "expected_output": "选择 article-a.md 作为 canonical，把 article-a-copy.md 用 git mv 移入 Archive/Duplicates/，重复文件写明 canonical 与重复依据；不删除任何文件；日志记录完全重复处理。",
+      "files": [],
+      "expectations": [
+        "使用 optimize_vault.py 脚本扫描并报告 Projects/Areas/Resources/Archive 的来源或指纹索引结果",
+        "脚本基于相同 source_url 或 content_fingerprint 判定完全重复",
+        "选择更完整的 article-a.md 作为 canonical",
+        "重复项进入 Archive/Duplicates/ 并写明 canonical 与重复依据",
+        "报告中明确未删除文件且未使用危险 git 操作"
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "在一个临时 brain vault 中优化链接。场景：早期 Resources/PKM/Obsidian Course.md 没有链接；后来新增了 Resources/Agent Memory/Agent Memory 架构全景.md、Areas/AI Native 转型.md、Projects/Loop Engineering 落地实验.md。Obsidian Course 正文提到 second brain、Claude Code、memory、skills。请补充新出现的高置信链接。",
+      "expected_output": "为 Obsidian Course 补 1-3 个高置信双链，并在相关 Area 或 Project 承接笔记中补资料索引；这些高置信问题应实际修复而不是只报告；避免把所有同主题笔记互相全连接。",
+      "files": [],
+      "expectations": [
+        "Obsidian Course 实际新增 1-3 个高置信双链，而不是只输出补链建议",
+        "资料笔记实际链接到至少一个相关 Area 或 Project 承接笔记",
+        "承接笔记实际获得资料索引或回链",
+        "没有把所有同主题笔记互相全连接",
+        "报告区分已补链内容与跳过/不确定内容"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "在一个临时 brain vault 中做全量体检但不要冒险修改。场景：Resources/Loop Engineering/Loop Intro.md 与 Resources/Loop Engineering/Loop Practice.md 标题相似、主题相同，但 URL 与 content_fingerprint 不同；Archive/Old/ai-agent.md 有一个 [[不存在的笔记]] 链接无法唯一匹配。请执行 meditate。",
+      "expected_output": "Loop Intro 和 Loop Practice 只作为主题交叉或疑似重复报告，不自动合并或归档；无法唯一匹配的失效链接只报告不修复；输出需要人工确认的建议。",
+      "files": [],
+      "expectations": [
+        "Loop Intro 和 Loop Practice 未被自动归档为完全重复",
+        "主题相似但 URL/指纹不同被报告为疑似重复或主题交叉",
+        "脚本把无法唯一匹配的失效链接放入 skipped_uncertain，且未自动改写",
+        "最终输出区分已自动处理与需要人工确认",
+        "报告说明无冒险修改或无误导性提交"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "在一个临时 brain vault 中执行 meditate，但运行前已有大量未提交改动：Resources/Loop Engineering/Loop Clearly Explained.md 已被用户修改且缺 content_fingerprint，Resources/AI Agents/agent.md 有无法唯一匹配的 [[@someone]] 链接，另外 .claude/skills/meditate/ 是未跟踪的新 skill 目录。请安全优化并报告结果。",
+      "expected_output": "把用户已修改的笔记视为 protected path，不补写 metadata、不暂存、不提交；报告明确说明 protected paths 导致只跳过/报告，且不要把 .claude/skills/meditate/ 自身当作 vault 内容保护对象；给出提交或清理现有改动后重跑、或缩小 --scope 的下一步。",
+      "files": [],
+      "expectations": [
+        "运行前已有未提交笔记被视为 protected paths 且未被编辑",
+        "缺 content_fingerprint 的 protected 笔记被报告为 protected_metadata 或证据不足，而不是被自动补全",
+        "无法唯一匹配的 [[@someone]] 只报告不修复",
+        "报告不把 .claude/skills/meditate/ 自身列为 vault 内容 protected path",
+        "最终输出说明脚本自检通过但本次未产生新的可提交优化改动，并给出重跑或缩小 scope 的下一步"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "在一个临时 brain vault 中优化已整理资料。场景：Resources/Loop Engineering/ 下已有 4 篇文章但没有 README 或 Map of Content；其中两篇正文明确提到 Areas/AI Native 转型.md 和 Projects/Loop Engineering 落地实验.md，相关 Area/Project 也没有资料索引。这些文件都不是 protected。请执行 meditate，尽量修复发现的问题。",
+      "expected_output": "在安全边界内实际创建或更新主题索引，并给相关资料补承接链接、给 Area/Project 补资料索引；只把无法确定的跨目录移动、重命名或主题拆并留作报告。",
+      "files": [],
+      "expectations": [
+        "非 protected 的高置信承接链接被实际补入资料笔记",
+        "相关 Area 或 Project 被实际补入资料索引或回链",
+        "Resources/Loop Engineering/ 的主题索引被创建或更新",
+        "只报告部分仅包含无法安全判断的问题，而不是把所有可修复问题都留作建议",
+        "最终输出明确区分已实际修复和仍需人工确认的项目"
+      ]
+    }
+  ]
+}

@@ -291,6 +291,28 @@ Original source text.
         self.assertEqual(1, len(report["invalid_fingerprints"]))
         self.assertEqual("source_fingerprint", report["invalid_fingerprints"][0]["field"])
 
+    def test_topic_readme_index_is_not_reported_missing_source_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            topic = vault / "Resources" / "PKM"
+            topic.mkdir(parents=True)
+            (topic / "README.md").write_text(
+                """---
+title: "PKM"
+type: index
+---
+
+# PKM
+
+## 资料索引
+""",
+                encoding="utf-8",
+            )
+
+            report = optimize_vault.build_report(vault, ["Resources"])
+
+        self.assertEqual([], report["metadata_missing"])
+
 
 if __name__ == "__main__":
     unittest.main()
