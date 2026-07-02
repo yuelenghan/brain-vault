@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,7 +29,7 @@ RESOURCE_INDEX_BEGIN = "<!-- BEGIN: resource-index -->"
 RESOURCE_INDEX_END = "<!-- END: resource-index -->"
 UNDERSTANDING_PROFILE_BEGIN = "<!-- BEGIN: understanding-profile -->"
 UNDERSTANDING_PROFILE_END = "<!-- END: understanding-profile -->"
-FIXED_REPORT_DIR = Path("/tmp").resolve()
+FIXED_REPORT_DIR = Path(tempfile.gettempdir()).resolve()
 FIXED_JSON_REPORT = FIXED_REPORT_DIR / "meditate.json"
 FIXED_MARKDOWN_REPORT = FIXED_REPORT_DIR / "meditate.md"
 SOURCE_EXTENSIONS = {
