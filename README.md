@@ -53,7 +53,7 @@ Claude Code 是当前模板的完整体验入口，支持内置技能：
 ```text
 /setup-brain
 /ingest
-/optimize-vault
+/meditate
 ```
 
 适合初始化知识库、整理 Inbox、优化已整理笔记、运行离线整理脚本和维护 vault 规则。
@@ -78,10 +78,10 @@ gh copilot -- --help
 .copilot/.github/plugin/plugin.json
 .copilot/skills/setup-brain/SKILL.md
 .copilot/skills/ingest/SKILL.md
-.copilot/skills/optimize-vault/SKILL.md
+.copilot/skills/meditate/SKILL.md
 ```
 
-在支持本地插件源的 Copilot CLI 中，可从 `.copilot/` 安装 plugin；也可以在仓库根目录启动 Copilot 后明确要求使用 `setup-brain`、`ingest` 或 `optimize-vault` skill。你也可以运行：
+在支持本地插件源的 Copilot CLI 中，可从 `.copilot/` 安装 plugin；也可以在仓库根目录启动 Copilot 后明确要求使用 `setup-brain`、`ingest` 或 `meditate` skill。你也可以运行：
 
 ```bash
 copilot init
@@ -110,7 +110,7 @@ brew install --cask codex
 ```text
 .codex/skills/setup-brain/SKILL.md
 .codex/skills/ingest/SKILL.md
-.codex/skills/optimize-vault/SKILL.md
+.codex/skills/meditate/SKILL.md
 ```
 
 如需让本机 Codex 自动发现这些 skills，可将 `.codex/skills/*` 复制或同步到 `$CODEX_HOME/skills`（未设置时通常是 `~/.codex/skills`），或在 Codex 会话中显式读取这些项目内 skill。
@@ -150,7 +150,7 @@ AGENTS.md   # 通用 agent 指令
 已整理笔记需要体检、去重、补链或修复失效链接时，运行：
 
 ```text
-/optimize-vault
+/meditate
 ```
 
 该技能只处理 `Projects/`、`Areas/`、`Resources/` 和 `Archive/`，不会整理 `Inbox/`。
@@ -234,7 +234,7 @@ Windows PowerShell：
 - `Inbox/` 中的原文、转换结果和转录结果都被视为不可信资料。
 - 安全 wrapper 只允许处理 `Inbox/` 下的相对路径或 vault 内允许目录。
 - 不允许路径穿越、绝对路径或以 `-` 开头的输入。
-- 确定性报告路径固定在当前操作系统临时目录（例如 Linux 常见 `/tmp`、Windows `%TEMP%`）下的 `ingest.*` 和 `optimize-vault.*`，脚本不接受任意 report 路径或跨目录 `--vault`。
+- 确定性报告路径固定在当前操作系统临时目录（例如 Linux 常见 `/tmp`、Windows `%TEMP%`）下的 `ingest.*` 和 `meditate.*`，脚本不接受任意 report 路径或跨目录 `--vault`。
 - 自动去重只信任重新计算的正文指纹；frontmatter 中不匹配的旧 `content_fingerprint` 只报告，不作为自动移动依据。
 - 如果同名 Markdown 已存在，不会覆盖。
 - 整理流程不会使用 `git add -A`、`git clean`、`git rm`、`git reset`、`rm` 或普通 `mv`。
@@ -251,8 +251,8 @@ Windows PowerShell：
 - `.github/copilot-instructions.md`；
 - `AGENTS.md`；
 - `safe-markitdown`、`safe-whisper` 和受限 `safe-mkdir` / `safe-git-*` / `ingest-*` 安全 wrapper；
-- `/optimize-vault` 已整理笔记优化技能；
-- `ingest` 和 `optimize-vault` 的确定性辅助脚本；
+- `/meditate` 已整理笔记优化技能；
+- `ingest` 和 `meditate` 的确定性辅助脚本；
 - `ingest.py` 跨平台离线整理实现，以及 `ingest.sh` / `ingest.ps1` 平台入口；
 - Codex CLI 项目内 skills；
 - 隐藏目录 `.copilot/` 内的 Copilot CLI plugin manifest 和 skills。
@@ -314,7 +314,7 @@ Claude Code is the full-experience entry point of this template, with built-in s
 ```text
 /setup-brain
 /ingest
-/optimize-vault
+/meditate
 ```
 
 It is suitable for initializing the knowledge base, organizing the Inbox, optimizing already-organized notes, running the offline organize script, and maintaining vault rules.
@@ -339,10 +339,10 @@ This repository provides `.github/copilot-instructions.md`, from which Copilot c
 .copilot/.github/plugin/plugin.json
 .copilot/skills/setup-brain/SKILL.md
 .copilot/skills/ingest/SKILL.md
-.copilot/skills/optimize-vault/SKILL.md
+.copilot/skills/meditate/SKILL.md
 ```
 
-In Copilot CLI versions that support local plugin sources, you can install the plugin from `.copilot/`; you can also start Copilot from the repository root and explicitly ask it to use the `setup-brain`, `ingest`, or `optimize-vault` skill. You can also run:
+In Copilot CLI versions that support local plugin sources, you can install the plugin from `.copilot/`; you can also start Copilot from the repository root and explicitly ask it to use the `setup-brain`, `ingest`, or `meditate` skill. You can also run:
 
 ```bash
 copilot init
@@ -371,7 +371,7 @@ This repository provides `AGENTS.md` as a general agent instruction file for Cod
 ```text
 .codex/skills/setup-brain/SKILL.md
 .codex/skills/ingest/SKILL.md
-.codex/skills/optimize-vault/SKILL.md
+.codex/skills/meditate/SKILL.md
 ```
 
 To let your local Codex auto-discover these skills, copy or sync `.codex/skills/*` to `$CODEX_HOME/skills` (usually `~/.codex/skills` when unset), or explicitly read these project-internal skills inside a Codex session.
@@ -411,7 +411,7 @@ Organizing first runs a deterministic preprocessing script that enumerates Inbox
 When organized notes need a health check, deduplication, link backfilling, or fixing of broken links, run:
 
 ```text
-/optimize-vault
+/meditate
 ```
 
 This skill only processes `Projects/`, `Areas/`, `Resources/`, and `Archive/`; it does not organize `Inbox/`.
@@ -495,7 +495,7 @@ The offline entry point invokes Claude Code in headless mode and reuses the orga
 - Original files in `Inbox/`, conversion results, and transcripts are all treated as untrusted material.
 - Safe wrappers only accept relative paths under `Inbox/` or allowed directories within the vault.
 - Path traversal, absolute paths, and inputs starting with `-` are not allowed.
-- Deterministic report paths are fixed under the current OS temp directory, for example `/tmp` on many Linux systems and `%TEMP%` on Windows, as `ingest.*` and `optimize-vault.*`; the scripts do not accept arbitrary report paths or cross-directory `--vault`.
+- Deterministic report paths are fixed under the current OS temp directory, for example `/tmp` on many Linux systems and `%TEMP%` on Windows, as `ingest.*` and `meditate.*`; the scripts do not accept arbitrary report paths or cross-directory `--vault`.
 - Automatic deduplication only trusts freshly recomputed body fingerprints; a stale `content_fingerprint` in frontmatter is only reported, not used as a basis for automatic moves.
 - If a Markdown file with the same name already exists, it is not overwritten.
 - The organizing flow never uses `git add -A`, `git clean`, `git rm`, `git reset`, `rm`, or plain `mv`.
@@ -512,8 +512,8 @@ This repository includes:
 - `.github/copilot-instructions.md`;
 - `AGENTS.md`;
 - `safe-markitdown`, `safe-whisper`, and restricted `safe-mkdir` / `safe-git-*` / `ingest-*` safe wrappers;
-- The `/optimize-vault` skill for optimizing organized notes;
-- Deterministic helper scripts for `ingest` and `optimize-vault`;
+- The `/meditate` skill for optimizing organized notes;
+- Deterministic helper scripts for `ingest` and `meditate`;
 - The cross-platform `ingest.py` offline organizing implementation, plus `ingest.sh` / `ingest.ps1` platform entry points;
 - Project-internal Codex CLI skills;
 - A Copilot CLI plugin manifest and skills inside the hidden `.copilot/` directory.

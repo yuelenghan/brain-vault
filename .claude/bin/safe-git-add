@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 ALLOWED_PREFIXES = ("Inbox/", "Projects/", "Areas/", "Resources/", "Archive/")
-ALLOWED_EXACT = {".claude/ingest.log", ".claude/optimize-vault.log"}
+ALLOWED_EXACT = {".claude/ingest.log", ".claude/meditate.log"}
 
 
 def valid_path(raw: str) -> bool:

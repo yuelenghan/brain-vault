@@ -22,16 +22,16 @@ IGNORED_GENERATED_PATHS = (
     ".codex/skills/example-workspace/output.txt",
     ".copilot/cache/output.txt",
     ".copilot/skills/example-workspace/output.txt",
-    ".skill-workspaces/agents/optimize-vault-workspace/output.txt",
+    ".skill-workspaces/agents/meditate-workspace/output.txt",
 )
 WHITELISTED_RUNTIME_PATHS = (
     ".claude/ingest.sh",
     ".claude/bin/safe-markitdown",
-    ".claude/skills/optimize-vault/SKILL.md",
-    ".agents/skills/optimize-vault/SKILL.md",
-    ".codex/skills/optimize-vault/SKILL.md",
+    ".claude/skills/meditate/SKILL.md",
+    ".agents/skills/meditate/SKILL.md",
+    ".codex/skills/meditate/SKILL.md",
     ".copilot/.github/plugin/plugin.json",
-    ".copilot/skills/optimize-vault/SKILL.md",
+    ".copilot/skills/meditate/SKILL.md",
 )
 
 

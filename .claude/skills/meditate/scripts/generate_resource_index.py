@@ -10,7 +10,7 @@ How it works:
     ...
     <!-- END: resource-index -->
 - If the README does not exist or has no marker block, only report; do not create it
-  (README creation is the responsibility of the optimize-vault topic-index check).
+  (README creation is the responsibility of the meditate topic-index check).
 - Anything outside the marker block (topic positioning, ownership notes, annotations) is left untouched.
 
 Usage:
@@ -143,7 +143,7 @@ def process_dir(dir_path: Path, check_only: bool) -> tuple[str, int]:
     if check_only:
         st = check_status(readme, items)
         label = {
-            "no-readme": f"无 README（需先由 optimize-vault 创建）: {dir_path}",
+            "no-readme": f"无 README（需先由 meditate 创建）: {dir_path}",
             "no-marker": f"README 无标记段（需先插入）: {dir_path}",
             "stale": f"过期: {dir_path}（{len(items)} 篇资料）",
             "fresh": f"最新: {dir_path}（{len(items)} 篇）",

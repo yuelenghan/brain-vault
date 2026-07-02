@@ -76,14 +76,14 @@ Archive/
 .claude/bin/
 .claude/skills/setup-brain/
 .claude/skills/ingest/
-.claude/skills/optimize-vault/
+.claude/skills/meditate/
 .codex/skills/setup-brain/
 .codex/skills/ingest/
-.codex/skills/optimize-vault/
+.codex/skills/meditate/
 .copilot/.github/plugin/
 .copilot/skills/setup-brain/
 .copilot/skills/ingest/
-.copilot/skills/optimize-vault/
+.copilot/skills/meditate/
 .github/
 ```
 
@@ -262,4 +262,4 @@ Keep the output concise:
 - Initialized identity-layer sections.
 - Tool status: `markitdown` installed/missing, `whisper` installed/missing, `ffmpeg` installed/missing, Whisper default model/model-download reminder, `copilot` installed/missing, `codex` installed/missing.
 - Enabled capabilities: Markdown organizing, document/data/web/Notebook conversion, screenshot placeholder, audio/video transcription, organized-note optimization, Copilot CLI instructions and plugin skills, Codex/generic-agent instructions and in-project skills.
-- Next steps: put material into `Inbox/` and run `/ingest`; run `/optimize-vault` when you want a health check on already-organized notes.
+- Next steps: put material into `Inbox/` and run `/ingest`; run `/meditate` when you want a health check on already-organized notes.

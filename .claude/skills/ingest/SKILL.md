@@ -164,12 +164,12 @@ If you must undo this run's moves before committing, use only the reverse `git m
 When this run's target is `Resources/<topic>/`, after moving and editing, run the script to update that topic README's resource-index section:
 
 ```bash
-<python> .claude/skills/optimize-vault/scripts/generate_resource_index.py --dir "Resources/<topic>"
+<python> .claude/skills/meditate/scripts/generate_resource_index.py --dir "Resources/<topic>"
 ```
 
 - The script only updates the content between `<!-- BEGIN: resource-index -->` and `<!-- END: resource-index -->` in the topic `README.md`; nothing outside the markers is touched.
 - Use the platform's Python launcher for `<python>`: usually `python3` on macOS / Linux, and `py -3` or `python` on Windows.
-- When the topic directory has no README or the README has no marker block, the script skips and reports — do not create a README just to update the index; topic README creation is the responsibility of the optimize-vault "topic-index gap" check.
+- When the topic directory has no README or the README has no marker block, the script skips and reports — do not create a README just to update the index; topic README creation is the responsibility of the meditate "topic-index gap" check.
 - After updating, `git add "Resources/<topic>/README.md"`.
 - This step applies only to `Resources/` targets; `Projects/` / `Areas/` / `Archive/` are not involved.
 
