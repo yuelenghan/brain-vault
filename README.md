@@ -1,5 +1,9 @@
 # brain-vault
 
+[中文](#中文) | [English](#english)
+
+## 中文
+
 把混乱丢进来，得到一个可链接、可维护的 PARA + Inbox 知识库。
 
 brain-vault 是一个面向 AI coding agents 的个人知识库模板。它用 `Inbox/` 接住网页、文档、会议记录、音视频转录和截图，通过 `/ingest` 分流新材料，并用 `/meditate` 持续优化已整理笔记。内置 Claude Code、Copilot CLI 和 Codex CLI 支持。
@@ -9,13 +13,6 @@ brain-vault 是一个面向 AI coding agents 的个人知识库模板。它用 `
 - 收集网页、文档、会议记录、音视频转录、截图等材料；
 - 把零散输入整理成项目、长期领域、资料库和归档；
 - 让 AI agent 根据你的身份、目标和偏好协助维护个人知识库。
-
-## 语言 / Language
-
-- [中文](#快速开始)
-- [English](#quick-start)
-
----
 
 ## 快速开始
 
@@ -268,7 +265,7 @@ Windows PowerShell：
 
 ---
 
-# brain-vault (English)
+## English
 
 Drop chaos in. Get a linked, maintainable PARA + Inbox vault out.
 
