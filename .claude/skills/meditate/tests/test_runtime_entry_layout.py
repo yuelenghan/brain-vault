@@ -28,6 +28,8 @@ WHITELISTED_RUNTIME_PATHS = (
     ".claude/ingest.sh",
     ".claude/bin/safe-markitdown",
     ".claude/skills/meditate/SKILL.md",
+    ".claude/skills/meditate/scripts/knowledge_model.py",
+    ".claude/skills/meditate/tests/test_knowledge_model.py",
     ".agents/skills/meditate/SKILL.md",
     ".codex/skills/meditate/SKILL.md",
     ".copilot/.github/plugin/plugin.json",
@@ -70,6 +72,38 @@ class RuntimeEntryLayoutTest(unittest.TestCase):
                 )
 
                 self.assertNotEqual(0, result.returncode)
+
+    def test_canonical_meditate_skill_uses_claude_script_paths(self) -> None:
+        text = (VAULT_ROOT / ".claude" / "skills" / "meditate" / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn(".claude/skills/meditate/scripts/optimize_vault.py", text)
+        self.assertIn(".claude/skills/meditate/scripts/generate_resource_index.py", text)
+        self.assertIn(".claude/skills/meditate/scripts/fix_frontmatter.py", text)
+        self.assertNotIn(".agents/skills/meditate/scripts/", text)
+
+    def test_agents_meditate_entrypoint_stays_thin(self) -> None:
+        agents_root = VAULT_ROOT / ".agents" / "skills" / "meditate"
+        unexpected = [
+            child.name
+            for child in sorted(agents_root.iterdir())
+            if child.is_dir() and child.name in {"scripts", "tests", "evals"}
+        ]
+        text = (agents_root / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertEqual([], unexpected)
+        self.assertIn(".claude/skills/meditate/SKILL.md", text)
+        self.assertNotIn(".agents/skills/meditate/scripts/", text)
+
+    def test_cli_wrappers_delegate_meditate_to_canonical_claude_skill(self) -> None:
+        for wrapper in (
+            VAULT_ROOT / ".codex" / "skills" / "meditate" / "SKILL.md",
+            VAULT_ROOT / ".copilot" / "skills" / "meditate" / "SKILL.md",
+        ):
+            with self.subTest(path=wrapper.relative_to(VAULT_ROOT).as_posix()):
+                text = wrapper.read_text(encoding="utf-8")
+                self.assertIn(".claude/skills/meditate/SKILL.md", text)
+                self.assertIn("不要整理 `Inbox/`", text)
+                self.assertIn("ingest", text)
 
 
 if __name__ == "__main__":

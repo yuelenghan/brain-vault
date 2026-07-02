@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
 import subprocess
 import sys
-import tempfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,13 +23,21 @@ MIN_OWNERSHIP_AREA_MATERIALS = 3
 MIN_OWNERSHIP_AREA_CONCEPTS = 3
 MIN_OWNERSHIP_SPLIT_TOPIC_MATERIALS = 5
 MIN_OWNERSHIP_SPLIT_CLUSTER_MATERIALS = 3
+MIN_RESOURCE_TOPIC_SPLIT_MATERIALS = 5
+MIN_RESOURCE_TOPIC_SPLIT_CLUSTER_MATERIALS = 3
 WIKILINK_RE = re.compile(r"!?(?<!\!)\[\[([^\]]+)\]\]")
 URL_RE = re.compile(r"https?://[^\s)\]}>\"']+")
 RESOURCE_INDEX_BEGIN = "<!-- BEGIN: resource-index -->"
 RESOURCE_INDEX_END = "<!-- END: resource-index -->"
+OWNERSHIP_INDEX_BEGIN = "<!-- BEGIN: ownership-index -->"
+OWNERSHIP_INDEX_END = "<!-- END: ownership-index -->"
 UNDERSTANDING_PROFILE_BEGIN = "<!-- BEGIN: understanding-profile -->"
 UNDERSTANDING_PROFILE_END = "<!-- END: understanding-profile -->"
-FIXED_REPORT_DIR = Path(tempfile.gettempdir()).resolve()
+TOPIC_RELATIONS_BEGIN = "<!-- BEGIN: topic-relations -->"
+TOPIC_RELATIONS_END = "<!-- END: topic-relations -->"
+OWNERSHIP_RELATIONS_BEGIN = "<!-- BEGIN: ownership-relations -->"
+OWNERSHIP_RELATIONS_END = "<!-- END: ownership-relations -->"
+FIXED_REPORT_DIR = Path("/tmp").resolve()
 FIXED_JSON_REPORT = FIXED_REPORT_DIR / "meditate.json"
 FIXED_MARKDOWN_REPORT = FIXED_REPORT_DIR / "meditate.md"
 SOURCE_EXTENSIONS = {
@@ -68,6 +76,20 @@ SOURCE_EXTENSIONS = {
 }
 
 
+def load_sibling_module(module_name: str, filename: str):
+    module_path = Path(__file__).resolve().with_name(filename)
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {filename}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+knowledge_model = load_sibling_module("meditate_knowledge_model", "knowledge_model.py")
+
+
 @dataclass
 class Note:
     path: str
@@ -88,6 +110,8 @@ class Note:
     outbound_count: int = 0
     duplicate_of: str | None = None
     protected: bool = False
+    _model_note_cache: object | None = field(default=None, init=False, repr=False, compare=False)
+    _concept_counts_cache: Counter[str] | None = field(default=None, init=False, repr=False, compare=False)
 
 
 @dataclass
@@ -344,9 +368,16 @@ def source_body_for_hash(text: str) -> str:
     i = 0
     while i < len(lines):
         stripped = lines[i].strip()
-        if stripped == RESOURCE_INDEX_BEGIN:
+        marker_end = {
+            RESOURCE_INDEX_BEGIN: RESOURCE_INDEX_END,
+            OWNERSHIP_INDEX_BEGIN: OWNERSHIP_INDEX_END,
+            UNDERSTANDING_PROFILE_BEGIN: UNDERSTANDING_PROFILE_END,
+            TOPIC_RELATIONS_BEGIN: TOPIC_RELATIONS_END,
+            OWNERSHIP_RELATIONS_BEGIN: OWNERSHIP_RELATIONS_END,
+        }.get(stripped)
+        if marker_end is not None:
             i += 1
-            while i < len(lines) and lines[i].strip() != RESOURCE_INDEX_END:
+            while i < len(lines) and lines[i].strip() != marker_end:
                 i += 1
             if i < len(lines):
                 i += 1
@@ -706,6 +737,10 @@ def infer_note_for_source(source_rel: str, notes_by_path: dict[str, Note]) -> No
     return notes_by_path.get(candidate)
 
 
+def is_source_attachment_context(source_rel: str) -> bool:
+    return any(part.lower() in {"source", "sources"} for part in Path(source_rel).parts)
+
+
 def source_policy_status(vault: Path, note: Note, actual: str, expected: str, protected: set[str]) -> tuple[str, str]:
     if is_protected(note.path, protected) or is_protected(actual, protected) or is_protected(expected, protected):
         return "protected", "note or source file has pre-existing uncommitted changes"
@@ -765,6 +800,8 @@ def source_file_anomalies(vault: Path, scopes: list[str], notes: list[Note], pro
             continue
         note = infer_note_for_source(source_rel, notes_by_path)
         if note is None:
+            if not is_source_attachment_context(source_rel):
+                continue
             findings.append({
                 "note": "",
                 "actual": source_rel,
@@ -926,37 +963,46 @@ def candidate_names(note: Note) -> list[str]:
 
 
 def text_mentions_name(text: str, name: str) -> bool:
-    if not name:
-        return False
-    def accepted(start: int, end: int) -> bool:
-        window = text[max(0, start - 96) : min(len(text), end + 96)]
-        negative_patterns = (
-            r"不直接关联",
-            r"不关联",
-            r"无关",
-            r"not\s+directly\s+related",
-            r"not\s+related",
-        )
-        return not any(re.search(pattern, window, flags=re.IGNORECASE) for pattern in negative_patterns)
-
-    if re.fullmatch(r"[A-Za-z0-9 _.-]+", name):
-        pattern = r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])"
-        return any(accepted(match.start(), match.end()) for match in re.finditer(pattern, text, flags=re.IGNORECASE))
-    lowered_text = text.lower()
-    lowered_name = name.lower()
-    start = 0
-    while True:
-        idx = lowered_text.find(lowered_name, start)
-        if idx < 0:
-            return False
-        if accepted(idx, idx + len(name)):
-            return True
-        start = idx + len(name)
+    return knowledge_model.text_mentions_name(text, name)
 
 
 def source_text_without_wikilinks(note: Note) -> str:
     text = note.abs_path.read_text(encoding="utf-8")
     return WIKILINK_RE.sub(" ", source_body_for_hash(text))
+
+
+def to_model_note(note: Note):
+    if note._model_note_cache is not None:
+        return note._model_note_cache
+    note._model_note_cache = knowledge_model.ModelNote(
+        path=note.path,
+        title=note.title,
+        aliases=note.aliases,
+        body=source_text_without_wikilinks(note),
+        kind=note_kind(note),
+    )
+    return note._model_note_cache
+
+
+def to_model_topic_profile(profile: TopicProfile):
+    return knowledge_model.TopicProfile(
+        topic=profile.topic,
+        dir=profile.dir,
+        names=list(profile.names),
+        material_count=profile.material_count,
+        has_readme=profile.has_readme,
+        concept_counts=profile.concept_counts.copy(),
+    )
+
+
+def to_model_ownership_profile(profile: OwnershipProfile):
+    return knowledge_model.OwnershipProfile(
+        path=profile.note.path,
+        title=profile.note.title,
+        aliases=profile.note.aliases,
+        body=source_text_without_wikilinks(profile.note),
+        concept_counts=profile.concept_counts.copy(),
+    )
 
 
 def note_links_to_target(note: Note, target: Note) -> bool:
@@ -1034,103 +1080,39 @@ GENERIC_CONCEPT_PHRASES = {
 
 
 def normalize_concept_token(token: str) -> str:
-    token = token.lower().strip("-_")
-    if token.endswith("ies") and len(token) > 5:
-        token = token[:-3] + "y"
-    elif token.endswith("es") and len(token) > 5 and not token.endswith(("ses", "xes")):
-        token = token[:-2]
-    elif token.endswith("s") and len(token) > 4 and not token.endswith(("sis", "ss", "us", "ys")):
-        token = token[:-1]
-    return token
+    return knowledge_model.normalize_concept_token(token)
 
 
 def meaningful_concept_token(token: str) -> bool:
-    if len(token) < 4:
-        return False
-    if token in CONCEPT_STOPWORDS:
-        return False
-    if token.isdigit():
-        return False
-    return True
+    return knowledge_model.meaningful_concept_token(token)
 
 
 def concept_counts_for_text(text: str) -> Counter[str]:
-    text = WIKILINK_RE.sub(" ", text)
-    counts: Counter[str] = Counter()
-    chunks = re.findall(r"[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[A-Za-z][A-Za-z0-9-]*)*", text)
-    for chunk in chunks:
-        segment: list[str] = []
-        for raw in re.findall(r"[A-Za-z][A-Za-z0-9-]*", chunk):
-            token = normalize_concept_token(raw)
-            if not meaningful_concept_token(token):
-                for first, second in zip(segment, segment[1:]):
-                    if first != second:
-                        counts[f"{first} {second}"] += 2
-                segment = []
-                continue
-            counts[token] += 1
-            segment.append(token)
-        for first, second in zip(segment, segment[1:]):
-            if first != second:
-                counts[f"{first} {second}"] += 2
-    generated_cjk_markers = (
-        "资料索引",
-        "主题定位",
-        "概念画像",
-        "适用范围",
-        "核心概念",
-        "资料数量",
-        "下一步",
-        "自动承接",
-        "稳定主题",
-        "重新理解",
-        "优化",
-    )
-    for cjk in re.findall(r"[\u4e00-\u9fff]{2,}", text):
-        if not any(marker in cjk for marker in generated_cjk_markers):
-            counts[cjk] += 1
-    return counts
+    return knowledge_model.concept_counts_for_text(text)
 
 
 def note_concept_counts(note: Note) -> Counter[str]:
-    text = f"{Path(note.path).stem}\n{note.title}\n{source_text_without_wikilinks(note)}"
-    return concept_counts_for_text(text)
+    if note._concept_counts_cache is None:
+        note._concept_counts_cache = knowledge_model.note_concept_counts(to_model_note(note))
+    return note._concept_counts_cache.copy()
 
 
 def concept_can_drive_structure(term: str) -> bool:
-    if term in GENERIC_CONCEPT_PHRASES:
-        return False
-    if " " in term:
-        return True
-    return bool(re.search(r"[\u4e00-\u9fff]", term)) and len(term) >= 4
+    return knowledge_model.concept_can_drive_structure(term)
 
 
 def top_concepts(profile: TopicProfile, limit: int = 12) -> list[str]:
-    items = [
-        (term, count)
-        for term, count in profile.concept_counts.items()
-        if count > 0 and concept_can_drive_structure(term)
-    ]
-    items.sort(key=lambda item: (-item[1], -len(item[0].split()), item[0]))
-    return [term for term, _count in items[:limit]]
+    return knowledge_model.top_concepts(to_model_topic_profile(profile), limit)
 
 
 def top_concepts_from_counts(counts: Counter[str], limit: int = 12) -> list[str]:
-    items = [
-        (term, count)
-        for term, count in counts.items()
-        if count > 0 and concept_can_drive_structure(term)
-    ]
-    items.sort(key=lambda item: (-item[1], -len(item[0].split()), item[0]))
-    return [term for term, _count in items[:limit]]
+    return knowledge_model.top_concepts_from_counts(counts, limit)
 
 
 def concept_topic_frequency(profiles: dict[str, TopicProfile]) -> Counter[str]:
-    frequency: Counter[str] = Counter()
-    for profile in profiles.values():
-        for term in set(top_concepts(profile, limit=24)):
-            frequency[term] += 1
-    return frequency
+    return knowledge_model.concept_topic_frequency(
+        {topic: to_model_topic_profile(profile) for topic, profile in profiles.items()}
+    )
 
 
 def ownership_profiles(notes: list[Note]) -> dict[str, OwnershipProfile]:
@@ -1144,28 +1126,17 @@ def ownership_profiles(notes: list[Note]) -> dict[str, OwnershipProfile]:
 
 
 def ownership_concept_frequency(profiles: dict[str, OwnershipProfile]) -> Counter[str]:
-    frequency: Counter[str] = Counter()
-    for profile in profiles.values():
-        for term in set(top_concepts_from_counts(profile.concept_counts, limit=24)):
-            frequency[term] += 1
-    return frequency
+    return knowledge_model.ownership_concept_frequency(
+        {path: to_model_ownership_profile(profile) for path, profile in profiles.items()}
+    )
 
 
 def ownership_concept_match_score(note: Note, profile: OwnershipProfile, concept_frequency: Counter[str]) -> tuple[int, list[str]]:
-    note_terms = {
-        term
-        for term in note_concept_counts(note)
-        if concept_can_drive_structure(term)
-    }
-    owner_terms = {
-        term
-        for term in top_concepts_from_counts(profile.concept_counts, limit=20)
-        if concept_frequency.get(term, 0) == 1
-    }
-    matched = sorted(note_terms & owner_terms)
-    if len(matched) < 3:
-        return 0, []
-    return len(matched), matched
+    return knowledge_model.ownership_concept_match_score(
+        to_model_note(note),
+        to_model_ownership_profile(profile),
+        concept_frequency,
+    )
 
 
 def resource_topic_material_notes(notes: list[Note], topic: str) -> list[Note]:
@@ -1180,22 +1151,7 @@ def resource_topic_material_notes(notes: list[Note], topic: str) -> list[Note]:
 
 
 def stable_topic_concepts(notes: list[Note], topic: str, limit: int = 12) -> list[str]:
-    counts: Counter[str] = Counter()
-    doc_frequency: Counter[str] = Counter()
-    for note in resource_topic_material_notes(notes, topic):
-        note_counts = note_concept_counts(note)
-        for term, count in note_counts.items():
-            if not concept_can_drive_structure(term):
-                continue
-            counts[term] += count
-            doc_frequency[term] += 1
-    items = [
-        (term, count)
-        for term, count in counts.items()
-        if doc_frequency[term] >= 2
-    ]
-    items.sort(key=lambda item: (-item[1], -len(item[0].split()), item[0]))
-    return [term for term, _count in items[:limit]]
+    return knowledge_model.stable_topic_concepts([to_model_note(note) for note in notes], topic, limit)
 
 
 def existing_ownership_match_for_topic(topic: str, concepts: list[str], notes: list[Note]) -> dict | None:
@@ -1302,6 +1258,53 @@ def render_area_understanding_profile(concepts: list[str], material_count: int) 
     )
 
 
+def render_area_scope_concepts(concepts: list[str]) -> str:
+    concept_text = "、".join(concepts) if concepts else "待积累"
+    return f"- 核心概念：{concept_text}"
+
+
+def area_scope_concepts_line(text: str) -> str:
+    lines = text.splitlines()
+    in_scope = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "## 适用范围":
+            in_scope = True
+            continue
+        if in_scope and line.startswith("## "):
+            return ""
+        if in_scope and stripped.startswith("- 核心概念："):
+            return stripped
+    return ""
+
+
+def upsert_area_scope_concepts(text: str, expected_line: str) -> str:
+    if not expected_line:
+        return text
+    trailing_newline = text.endswith("\n")
+    lines = text[:-1].split("\n") if trailing_newline else text.split("\n")
+    scope_heading = next((idx for idx, line in enumerate(lines) if line.strip() == "## 适用范围"), None)
+    if scope_heading is None:
+        return text
+
+    next_heading = len(lines)
+    for idx in range(scope_heading + 1, len(lines)):
+        if lines[idx].startswith("## "):
+            next_heading = idx
+            break
+    for idx in range(scope_heading + 1, next_heading):
+        if lines[idx].strip().startswith("- 核心概念："):
+            lines[idx] = expected_line
+            return "\n".join(lines) + ("\n" if trailing_newline else "")
+    for idx in range(scope_heading + 1, next_heading):
+        if lines[idx].strip().startswith("- 主题来源："):
+            lines.insert(idx + 1, expected_line)
+            return "\n".join(lines) + ("\n" if trailing_newline else "")
+    insert_at = scope_heading + 1
+    lines.insert(insert_at, expected_line)
+    return "\n".join(lines) + ("\n" if trailing_newline else "")
+
+
 def ownership_area_profile_gaps(vault: Path, notes: list[Note], protected: set[str]) -> list[dict]:
     by_path = {note.path: note for note in notes}
     gaps: list[dict] = []
@@ -1318,10 +1321,17 @@ def ownership_area_profile_gaps(vault: Path, notes: list[Note], protected: set[s
             profile = resource_topic_profiles(notes).get(topic)
             concepts = top_concepts(profile) if profile else []
         expected_profile = render_area_understanding_profile(concepts[:8], len(material_notes))
+        expected_scope_concepts = render_area_scope_concepts(concepts[:8])
+        expected_index = render_ownership_material_index([note.path for note in material_notes], topic_dir)
         area_text = area.abs_path.read_text(encoding="utf-8", errors="replace")
         span = understanding_profile_span(area_text)
         current_profile = area_text[span[0] : span[1]] if span is not None else ""
         profile_stale = current_profile != expected_profile
+        current_scope_concepts = area_scope_concepts_line(area_text)
+        scope_stale = current_scope_concepts != expected_scope_concepts
+        index_span = ownership_index_span(area_text)
+        current_index = area_text[index_span[0] : index_span[1]] if index_span is not None else ""
+        index_stale = current_index != expected_index
         missing_index_links = [
             note.path
             for note in material_notes
@@ -1332,7 +1342,13 @@ def ownership_area_profile_gaps(vault: Path, notes: list[Note], protected: set[s
             for note in material_notes
             if not note_links_to_target(note, area)
         ]
-        if not profile_stale and not missing_index_links and not missing_reverse_links:
+        if (
+            not profile_stale
+            and not scope_stale
+            and not index_stale
+            and not missing_index_links
+            and not missing_reverse_links
+        ):
             continue
         protected_paths = [
             path
@@ -1345,9 +1361,12 @@ def ownership_area_profile_gaps(vault: Path, notes: list[Note], protected: set[s
         elif span is None:
             status = "missing_markers"
             reason = "auto-created Area has no understanding-profile marker block"
-        elif profile_stale:
+        elif profile_stale or scope_stale:
             status = "stale"
             reason = "auto-created Area profile or material count differs from current resource topic"
+        elif index_stale:
+            status = "stale_index"
+            reason = "auto-created Area material index differs from current resource topic"
         elif missing_index_links or missing_reverse_links:
             status = "missing_links"
             reason = "auto-created Area material index or reciprocal material links are incomplete"
@@ -1363,6 +1382,10 @@ def ownership_area_profile_gaps(vault: Path, notes: list[Note], protected: set[s
                 "concepts": concepts[:8],
                 "expected_profile": expected_profile,
                 "current_profile": current_profile,
+                "expected_scope_concepts": expected_scope_concepts,
+                "current_scope_concepts": current_scope_concepts,
+                "expected_index": expected_index,
+                "current_index": current_index,
                 "missing_index_links": missing_index_links,
                 "missing_reverse_links": missing_reverse_links,
                 "status": status,
@@ -1502,6 +1525,14 @@ def titleize_concept(term: str) -> str:
     return " ".join(part.capitalize() for part in term.split())
 
 
+def title_starts_with_concept(note: Note, concept: str) -> bool:
+    return knowledge_model.title_starts_with_concept(to_model_note(note), concept)
+
+
+def title_mentions_concept(note: Note, concept: str) -> bool:
+    return knowledge_model.title_mentions_concept(to_model_note(note), concept)
+
+
 def area_for_resource_topic(notes: list[Note], topic: str) -> Note | None:
     target = f"Areas/{topic}.md"
     exact = next((note for note in notes if note.path == target and is_ownership_note(note)), None)
@@ -1539,6 +1570,44 @@ def existing_ownership_covers_materials(notes: list[Note], material_paths: list[
     return False
 
 
+def scored_ownership_subclusters(
+    notes: list[Note],
+    material_notes: list[Note],
+    topic_key: str,
+    title_matcher,
+) -> list[tuple[int, int, str, list[Note]]]:
+    concept_notes: dict[str, list[Note]] = defaultdict(list)
+    concept_counts: Counter[str] = Counter()
+    for note in material_notes:
+        counts = note_concept_counts(note)
+        for term, count in counts.items():
+            if not concept_can_drive_structure(term):
+                continue
+            if normalize_name(term) == topic_key:
+                continue
+            if not title_matcher(note, term):
+                continue
+            concept_notes[term].append(note)
+            concept_counts[term] += count
+
+    scored: list[tuple[int, int, str, list[Note]]] = []
+    for term, group in concept_notes.items():
+        unique_notes = sorted({note.path: note for note in group}.values(), key=lambda item: item.path)
+        if len(unique_notes) < MIN_OWNERSHIP_SPLIT_CLUSTER_MATERIALS:
+            continue
+        if len(unique_notes) >= len(material_notes):
+            continue
+        material_paths = [note.path for note in unique_notes]
+        if existing_ownership_covers_materials(notes, material_paths):
+            continue
+        target_name = titleize_concept(term)
+        if existing_ownership_named(notes, target_name) is not None:
+            continue
+        scored.append((len(unique_notes), concept_counts[term], term, unique_notes))
+    scored.sort(key=lambda item: (item[0], item[1], len(item[2].split()), item[2]), reverse=True)
+    return scored
+
+
 def ownership_split_candidates(vault: Path, notes: list[Note], protected: set[str]) -> list[dict]:
     profiles = resource_topic_profiles(notes)
     candidates: list[dict] = []
@@ -1550,34 +1619,11 @@ def ownership_split_candidates(vault: Path, notes: list[Note], protected: set[st
         if parent is None:
             continue
         topic_key = normalize_name(topic)
-        concept_notes: dict[str, list[Note]] = defaultdict(list)
-        concept_counts: Counter[str] = Counter()
-        for note in material_notes:
-            counts = note_concept_counts(note)
-            for term, count in counts.items():
-                if not concept_can_drive_structure(term):
-                    continue
-                if normalize_name(term) == topic_key:
-                    continue
-                concept_notes[term].append(note)
-                concept_counts[term] += count
-        scored: list[tuple[int, int, str, list[Note]]] = []
-        for term, group in concept_notes.items():
-            unique_notes = sorted({note.path: note for note in group}.values(), key=lambda item: item.path)
-            if len(unique_notes) < MIN_OWNERSHIP_SPLIT_CLUSTER_MATERIALS:
-                continue
-            if len(unique_notes) >= len(material_notes):
-                continue
-            material_paths = [note.path for note in unique_notes]
-            if existing_ownership_covers_materials(notes, material_paths):
-                continue
-            target_name = titleize_concept(term)
-            if existing_ownership_named(notes, target_name) is not None:
-                continue
-            scored.append((len(unique_notes), concept_counts[term], term, unique_notes))
+        scored = scored_ownership_subclusters(notes, material_notes, topic_key, title_starts_with_concept)
+        if not scored:
+            scored = scored_ownership_subclusters(notes, material_notes, topic_key, title_mentions_concept)
         if not scored:
             continue
-        scored.sort(key=lambda item: (item[0], item[1], len(item[2].split()), item[2]), reverse=True)
         best_doc_count, _count, concept, cluster_notes = scored[0]
         tied = [item for item in scored if item[0] == best_doc_count and item[1] == _count]
         if len(tied) > 1:
@@ -1664,94 +1710,32 @@ def resource_topic_profiles(notes: list[Note], exclude_path: str | None = None) 
 
 
 def topic_equivalence_keys(profile: TopicProfile) -> set[str]:
-    keys: set[str] = set()
-    for name in profile.names:
-        normalized = normalize_name(name)
-        if not normalized:
-            continue
-        keys.add(normalized)
-        if re.fullmatch(r"[a-z0-9 ._-]+", normalized):
-            words = normalized.split()
-            if words and words[-1].endswith("s") and len(words[-1]) > 3:
-                words[-1] = words[-1][:-1]
-                keys.add(" ".join(words))
-    return keys
+    return knowledge_model.topic_equivalence_keys(to_model_topic_profile(profile))
 
 
 def canonical_topic_for_equivalent_group(group: list[TopicProfile]) -> TopicProfile:
-    return sorted(
-        group,
-        key=lambda profile: (
-            profile.has_readme,
-            profile.material_count,
-            profile.topic.endswith("s"),
-            len(profile.topic),
-            profile.topic,
-        ),
-        reverse=True,
-    )[0]
+    winner = knowledge_model.canonical_topic_for_equivalent_group(
+        [to_model_topic_profile(profile) for profile in group]
+    )
+    return next(profile for profile in group if profile.topic == winner.topic)
 
 
 def equivalent_topic_canonical_map(profiles: dict[str, TopicProfile]) -> dict[str, str]:
-    by_key: dict[str, list[TopicProfile]] = defaultdict(list)
-    for profile in profiles.values():
-        for key in topic_equivalence_keys(profile):
-            by_key[key].append(profile)
-    canonical: dict[str, str] = {}
-    for group in by_key.values():
-        unique = {profile.topic: profile for profile in group}
-        if len(unique) < 2:
-            continue
-        winner = canonical_topic_for_equivalent_group(list(unique.values()))
-        for topic in unique:
-            if topic != winner.topic:
-                current = canonical.get(topic)
-                if current is None:
-                    canonical[topic] = winner.topic
-                else:
-                    current_profile = profiles[current]
-                    canonical[topic] = canonical_topic_for_equivalent_group([current_profile, winner]).topic
-    return canonical
+    return knowledge_model.equivalent_topic_canonical_map(
+        {topic: to_model_topic_profile(profile) for topic, profile in profiles.items()}
+    )
 
 
 def topic_match_score(note: Note, profile: TopicProfile) -> tuple[int, list[str]]:
-    title_text = f"{Path(note.path).stem}\n{note.title}"
-    body = source_text_without_wikilinks(note)
-    score = 0
-    matched: list[str] = []
-    seen: set[str] = set()
-    for name in profile.names:
-        key = normalize_name(name)
-        if key in seen:
-            continue
-        title_match = text_mentions_name(title_text, name)
-        body_match = text_mentions_name(body, name)
-        if not title_match and not body_match:
-            continue
-        seen.add(key)
-        matched.append(name)
-        if title_match:
-            score += 4
-        if body_match:
-            score += 1
-    return score, matched
+    return knowledge_model.topic_match_score(to_model_note(note), to_model_topic_profile(profile))
 
 
 def topic_concept_match_score(note: Note, profile: TopicProfile, concept_frequency: Counter[str] | None = None) -> tuple[int, list[str]]:
-    if profile.material_count < 2:
-        return 0, []
-    note_terms = {
-        term
-        for term in note_concept_counts(note)
-        if concept_can_drive_structure(term)
-    }
-    profile_terms = set(top_concepts(profile, limit=16))
-    if concept_frequency is not None:
-        profile_terms = {term for term in profile_terms if concept_frequency.get(term, 0) == 1}
-    matched = sorted(note_terms & profile_terms)
-    if len(matched) < 3:
-        return 0, []
-    return len(matched), matched
+    return knowledge_model.topic_concept_match_score(
+        to_model_note(note),
+        to_model_topic_profile(profile),
+        concept_frequency,
+    )
 
 
 def source_moves_for_note_move(vault: Path, note: Note, target_note_rel: str) -> list[dict]:
@@ -1773,7 +1757,45 @@ def source_moves_for_note_move(vault: Path, note: Note, target_note_rel: str) ->
     return moves
 
 
-def structural_move_status(vault: Path, note: Note, target_note_rel: str, protected: set[str]) -> tuple[str, str, list[dict]]:
+def path_qualified_incoming_wikilink_sources(note: Note, notes: list[Note]) -> list[str]:
+    target_path = normalize_relpath(note.path)
+    sources: set[str] = set()
+    for source in notes:
+        for link in source.wikilinks:
+            if not has_path_component(link):
+                continue
+            if target_path in set(markdown_link_path_candidates(link)):
+                sources.add(source.path)
+                break
+    return sorted(sources)
+
+
+def filename_stem_matches(note: Note, notes: list[Note]) -> list[str]:
+    target_key = normalize_name(Path(note.path).stem)
+    return sorted(
+        note.path
+        for note in notes
+        if normalize_name(Path(note.path).stem) == target_key
+    )
+
+
+def structural_safety_notes(vault: Path, scopes: list[str], protected: set[str], notes: list[Note]) -> list[Note]:
+    requested = {normalize_relpath(scope).strip("/") for scope in scopes}
+    defaults = {normalize_relpath(scope).strip("/") for scope in DEFAULT_SCOPES}
+    if requested == defaults:
+        return notes
+    all_notes, _by_name, _file_stems, _attachment_targets = build_index(vault, DEFAULT_SCOPES, protected)
+    return all_notes
+
+
+def structural_move_status(
+    vault: Path,
+    note: Note,
+    target_note_rel: str,
+    protected: set[str],
+    notes: list[Note],
+    all_notes: list[Note],
+) -> tuple[str, str, list[dict]]:
     source_moves = source_moves_for_note_move(vault, note, target_note_rel)
     if is_protected(note.path, protected) or is_protected(target_note_rel, protected):
         return "protected", "note or target path has pre-existing uncommitted changes", source_moves
@@ -1784,13 +1806,131 @@ def structural_move_status(vault: Path, note: Note, target_note_rel: str, protec
             return "protected", "referenced source file has pre-existing uncommitted changes", source_moves
         if (vault / move["new"]).exists():
             return "destination_exists", "target source file already exists", source_moves
+    incoming_path_links = path_qualified_incoming_wikilink_sources(note, all_notes)
+    scoped_paths = {source.path for source in notes}
+    outside_scope_incoming_links = [
+        source
+        for source in incoming_path_links
+        if source not in scoped_paths
+    ]
+    if outside_scope_incoming_links:
+        return "outside_scope", "incoming path-qualified wikilinks exist outside the requested scope", source_moves
+    protected_incoming_links = [
+        source
+        for source in incoming_path_links
+        if is_protected(source, protected)
+    ]
+    if protected_incoming_links:
+        return "protected", "incoming path-qualified wikilinks have pre-existing uncommitted changes", source_moves
+    if incoming_path_links and len(filename_stem_matches(note, all_notes)) > 1:
+        return "ambiguous_incoming_link", "incoming path-qualified wikilinks cannot be uniquely repaired to the target filename stem", source_moves
     return "fixable", "current-vault topic evidence points to a unique existing topic", source_moves
 
 
-def structural_reunderstanding_candidates(vault: Path, notes: list[Note], protected: set[str]) -> list[dict]:
+def resource_topic_split_decisions(notes: list[Note]) -> list[dict]:
+    profiles = resource_topic_profiles(notes)
+    decisions: list[dict] = []
+    for topic, _profile in sorted(profiles.items()):
+        decision = knowledge_model.resource_topic_split_decision(
+            [to_model_note(note) for note in notes],
+            topic,
+            MIN_RESOURCE_TOPIC_SPLIT_MATERIALS,
+            MIN_RESOURCE_TOPIC_SPLIT_CLUSTER_MATERIALS,
+        )
+        if decision["status"] == "insufficient_topic_materials":
+            continue
+        concept = decision.get("concept", "")
+        decisions.append(
+            {
+                "topic": topic,
+                "topic_dir": f"Resources/{topic}",
+                "from_topic": topic,
+                "to_topic": titleize_concept(concept) if concept else "",
+                "status": decision["status"],
+                "reason": decision["reason"],
+                "matched": [concept] if concept else [],
+                "material_count": decision["material_count"],
+                "topic_material_count": decision["topic_material_count"],
+                "evidence_count": decision["evidence_count"],
+                "material_notes": decision["note_paths"],
+            }
+        )
+    return decisions
+
+
+def resource_topic_split_candidates(
+    vault: Path,
+    notes: list[Note],
+    protected: set[str],
+    all_notes: list[Note] | None = None,
+) -> list[dict]:
+    safety_notes = all_notes if all_notes is not None else notes
+    candidates: list[dict] = []
+    for decision in resource_topic_split_decisions(notes):
+        if decision["status"] == "ambiguous":
+            source = decision["material_notes"][0] if decision["material_notes"] else ""
+            candidates.append(
+                {
+                    "source": source,
+                    "target": "",
+                    "kind": "topic_split",
+                    "matched": decision["matched"],
+                    "from_topic": decision["from_topic"],
+                    "to_topic": decision["to_topic"],
+                    "score": decision["material_count"],
+                    "current_score": 0,
+                    "status": "ambiguous",
+                    "fixable": False,
+                    "reason": decision["reason"],
+                    "source_moves": [],
+                }
+            )
+            continue
+
+        if decision["status"] not in {"split_candidate", "whole_topic_rename"}:
+            continue
+        by_path = {note.path: note for note in notes}
+        target_topic = decision["to_topic"]
+        for note_path in decision["material_notes"]:
+            note = by_path[note_path]
+            target_note_rel = (Path("Resources") / target_topic / Path(note.path).name).as_posix()
+            status, reason, source_moves = structural_move_status(
+                vault,
+                note,
+                target_note_rel,
+                protected,
+                notes,
+                safety_notes,
+            )
+            candidates.append(
+                {
+                    "source": note.path,
+                    "target": target_note_rel,
+                    "kind": "topic_rename" if decision["status"] == "whole_topic_rename" else "topic_split",
+                    "matched": decision["matched"],
+                    "from_topic": decision["from_topic"],
+                    "to_topic": target_topic,
+                    "score": decision["material_count"],
+                    "current_score": 0,
+                    "status": status,
+                    "fixable": status == "fixable",
+                    "reason": decision["reason"] if status == "fixable" else reason,
+                    "source_moves": source_moves,
+                }
+            )
+    return candidates
+
+
+def structural_reunderstanding_candidates(
+    vault: Path,
+    notes: list[Note],
+    protected: set[str],
+    all_notes: list[Note] | None = None,
+) -> list[dict]:
+    safety_notes = all_notes if all_notes is not None else notes
     profiles = resource_topic_profiles(notes)
     topic_merge_targets = equivalent_topic_canonical_map(profiles)
-    candidates: list[dict] = []
+    candidates: list[dict] = resource_topic_split_candidates(vault, notes, protected, safety_notes)
     for note in sorted(notes, key=lambda item: item.path):
         current_topic = resource_topic_name(note.path)
         if current_topic is None or not is_material_note(note):
@@ -1801,7 +1941,14 @@ def structural_reunderstanding_candidates(vault: Path, notes: list[Note], protec
         if current_topic in topic_merge_targets:
             target_topic = topic_merge_targets[current_topic]
             target_note_rel = (Path("Resources") / target_topic / Path(note.path).name).as_posix()
-            status, reason, source_moves = structural_move_status(vault, note, target_note_rel, protected)
+            status, reason, source_moves = structural_move_status(
+                vault,
+                note,
+                target_note_rel,
+                protected,
+                notes,
+                safety_notes,
+            )
             candidates.append(
                 {
                     "source": note.path,
@@ -1851,7 +1998,14 @@ def structural_reunderstanding_candidates(vault: Path, notes: list[Note], protec
                     )
                     continue
                 target_note_rel = (Path("Resources") / best_topic / Path(note.path).name).as_posix()
-                status, reason, source_moves = structural_move_status(vault, note, target_note_rel, protected)
+                status, reason, source_moves = structural_move_status(
+                    vault,
+                    note,
+                    target_note_rel,
+                    protected,
+                    notes,
+                    safety_notes,
+                )
                 candidates.append(
                     {
                         "source": note.path,
@@ -1912,7 +2066,14 @@ def structural_reunderstanding_candidates(vault: Path, notes: list[Note], protec
             )
             continue
         target_note_rel = (Path("Resources") / best_topic / Path(note.path).name).as_posix()
-        status, reason, source_moves = structural_move_status(vault, note, target_note_rel, protected)
+        status, reason, source_moves = structural_move_status(
+            vault,
+            note,
+            target_note_rel,
+            protected,
+            notes,
+            safety_notes,
+        )
         candidates.append(
             {
                 "source": note.path,
@@ -1929,6 +2090,77 @@ def structural_reunderstanding_candidates(vault: Path, notes: list[Note], protec
                 "source_moves": source_moves,
             }
         )
+    return candidates
+
+
+def same_topic_peer_link_candidates(notes: list[Note], existing_candidates: list[dict]) -> list[dict]:
+    candidates: list[dict] = []
+    source_counts = Counter(item["source"] for item in existing_candidates)
+    existing_pairs = {(item["source"], item["target"]) for item in existing_candidates}
+    by_topic: dict[str, list[Note]] = defaultdict(list)
+    for note in notes:
+        topic = resource_topic_name(note.path)
+        if topic is not None and is_material_note(note):
+            by_topic[topic].append(note)
+
+    scored_pairs: list[tuple[int, str, str, list[str], Note, Note]] = []
+    for topic, topic_notes in sorted(by_topic.items()):
+        if len(topic_notes) < 2:
+            continue
+        topic_key = normalize_name(topic)
+        note_terms: dict[str, set[str]] = {}
+        term_frequency: Counter[str] = Counter()
+        for note in topic_notes:
+            terms = {
+                term
+                for term in note_concept_counts(note)
+                if concept_can_drive_structure(term) and normalize_name(term) != topic_key
+            }
+            note_terms[note.path] = terms
+            term_frequency.update(terms)
+
+        sorted_notes = sorted(topic_notes, key=lambda item: item.path)
+        for left_index, left in enumerate(sorted_notes):
+            for right in sorted_notes[left_index + 1 :]:
+                shared = sorted(
+                    term
+                    for term in note_terms[left.path] & note_terms[right.path]
+                    if term_frequency.get(term, 0) == 2
+                )
+                title_shared = [
+                    term
+                    for term in shared
+                    if title_mentions_concept(left, term) and title_mentions_concept(right, term)
+                ]
+                if not title_shared:
+                    continue
+                if len(shared) < 3:
+                    continue
+                matched = [*title_shared, *[term for term in shared if term not in title_shared]][:5]
+                scored_pairs.append((len(shared), left.path, right.path, matched, left, right))
+
+    scored_pairs.sort(key=lambda item: (-item[0], item[1], item[2]))
+    for score, _left_path, _right_path, shared, left, right in scored_pairs:
+        for source, target in ((left, right), (right, left)):
+            if source_counts[source.path] >= 5:
+                continue
+            if (source.path, target.path) in existing_pairs or note_links_to_target(source, target):
+                continue
+            candidates.append(
+                {
+                    "source": source.path,
+                    "target": target.path,
+                    "target_stem": Path(target.path).stem,
+                    "source_stem": Path(source.path).stem,
+                    "matched": shared,
+                    "kind": "same_topic_concept",
+                    "fixable": not source.protected,
+                    "reason": f"same Resource topic shares distinctive concepts: {', '.join(shared)}",
+                    "score": score,
+                }
+            )
+            existing_pairs.add((source.path, target.path))
+            source_counts[source.path] += 1
     return candidates
 
 
@@ -1998,6 +2230,7 @@ def understanding_link_candidates(notes: list[Note]) -> list[dict]:
                 "reason": f"concept profile overlaps: {', '.join(matched)}",
             }
         )
+    candidates.extend(same_topic_peer_link_candidates(notes, candidates))
     return candidates
 
 
@@ -2068,6 +2301,61 @@ def resource_index_span(text: str) -> tuple[int, int] | None:
     return begin, end + len(RESOURCE_INDEX_END)
 
 
+def ownership_index_span(text: str) -> tuple[int, int] | None:
+    begin = text.find(OWNERSHIP_INDEX_BEGIN)
+    if begin == -1:
+        return None
+    end = text.find(OWNERSHIP_INDEX_END, begin)
+    if end == -1:
+        return None
+    return begin, end + len(OWNERSHIP_INDEX_END)
+
+
+def render_ownership_material_index(material_notes: list[str], topic_dir: str) -> str:
+    lines = [OWNERSHIP_INDEX_BEGIN, ""]
+    if not material_notes:
+        lines.append("> 暂无可承接资料。")
+    for path in sorted(material_notes):
+        lines.append(f"- [[{Path(path).stem}]]（自动承接：`{topic_dir}`）")
+    lines.append("")
+    lines.append(OWNERSHIP_INDEX_END)
+    return "\n".join(lines)
+
+
+def upsert_ownership_index_section(text: str, expected_index: str) -> str:
+    span = ownership_index_span(text)
+    if span is not None:
+        return text[: span[0]] + expected_index + text[span[1] :]
+
+    trailing_newline = text.endswith("\n")
+    lines = text[:-1].split("\n") if trailing_newline else text.split("\n")
+    index_heading = next((idx for idx, line in enumerate(lines) if line.strip() == "## 资料索引"), None)
+    if index_heading is None:
+        base = text.rstrip()
+        return base + "\n\n## 资料索引\n\n" + expected_index + "\n"
+
+    next_heading = len(lines)
+    for idx in range(index_heading + 1, len(lines)):
+        if lines[idx].startswith("## ") and lines[idx].strip() != "## 资料索引":
+            next_heading = idx
+            break
+    preserved_section = [
+        line
+        for line in lines[index_heading + 1 : next_heading]
+        if "（自动承接：" not in line
+    ]
+    while preserved_section and not preserved_section[0].strip():
+        preserved_section.pop(0)
+    while preserved_section and not preserved_section[-1].strip():
+        preserved_section.pop()
+    output = lines[: index_heading + 1] + ["", expected_index]
+    if preserved_section:
+        output.extend(["", *preserved_section])
+    if next_heading < len(lines):
+        output.extend(["", *lines[next_heading:]])
+    return "\n".join(output) + ("\n" if trailing_newline else "")
+
+
 def render_topic_readme(topic: str, expected_index: str) -> str:
     return (
         "---\n"
@@ -2084,10 +2372,6 @@ def render_topic_readme(topic: str, expected_index: str) -> str:
 
 def render_created_area(topic: str, topic_dir: str, concepts: list[str], material_notes: list[str], date: str) -> str:
     concept_text = "、".join(concepts) if concepts else "待积累"
-    index_lines = [
-        f"- [[{Path(path).stem}]]（自动承接：`{topic_dir}`）"
-        for path in material_notes
-    ]
     created = date if date and date != "未注明日期" else ""
     created_line = f"created: {quote_yaml(created)}\n" if created else ""
     return (
@@ -2106,7 +2390,7 @@ def render_created_area(topic: str, topic_dir: str, concepts: list[str], materia
         "## 概念画像\n\n"
         f"{render_area_understanding_profile(concepts, len(material_notes))}\n\n"
         "## 资料索引\n\n"
-        + "\n".join(index_lines)
+        + render_ownership_material_index(material_notes, topic_dir)
         + "\n\n"
         "## 下一步\n\n"
         "- 持续由 meditate 自动补链、更新画像，并在知识增长后重构边界。\n"
@@ -2123,10 +2407,6 @@ def render_child_area(
 ) -> str:
     created = date if date and date != "未注明日期" else ""
     created_line = f"created: {quote_yaml(created)}\n" if created else ""
-    index_lines = [
-        f"- [[{Path(path).stem}]]（子承接：`{topic_dir}` / {concept}）"
-        for path in material_notes
-    ]
     profile = render_area_understanding_profile([concept], len(material_notes))
     return (
         "---\n"
@@ -2145,7 +2425,7 @@ def render_child_area(
         "## 概念画像\n\n"
         f"{profile}\n\n"
         "## 资料索引\n\n"
-        + "\n".join(index_lines)
+        + render_ownership_material_index(material_notes, topic_dir)
         + "\n\n"
         "## 下一步\n\n"
         "- 持续由 meditate 自动补链、更新画像，并在知识增长后重构边界。\n"
@@ -2221,6 +2501,104 @@ def upsert_understanding_profile_section(text: str, expected_profile: str) -> st
     return "\n".join(output) + ("\n" if trailing_newline else "")
 
 
+def topic_relations_span(text: str) -> tuple[int, int] | None:
+    begin = text.find(TOPIC_RELATIONS_BEGIN)
+    if begin == -1:
+        return None
+    end = text.find(TOPIC_RELATIONS_END, begin)
+    if end == -1:
+        return None
+    return begin, end + len(TOPIC_RELATIONS_END)
+
+
+def render_topic_relations(relations: list[dict]) -> str:
+    lines = [TOPIC_RELATIONS_BEGIN, ""]
+    if not relations:
+        lines.append("> 暂无稳定相关主题。")
+    for relation in sorted(relations, key=lambda item: item["target_stem"]):
+        concepts = relation.get("concepts", [])[:5]
+        concept_text = "、".join(concepts) if concepts else "待积累"
+        lines.append(
+            f"- [[{relation['target_readme_stem']}|{relation['target_stem']}]]"
+            f"（共享概念：{concept_text}）"
+        )
+    lines.append("")
+    lines.append(TOPIC_RELATIONS_END)
+    return "\n".join(lines)
+
+
+def upsert_topic_relations_section(text: str, expected_relations: str) -> str:
+    span = topic_relations_span(text)
+    if span is not None:
+        return text[: span[0]] + expected_relations + text[span[1] :]
+
+    trailing_newline = text.endswith("\n")
+    lines = text[:-1].split("\n") if trailing_newline else text.split("\n")
+    relations_heading = next((idx for idx, line in enumerate(lines) if line.strip() == "## 相关主题"), None)
+    if relations_heading is None:
+        base = text.rstrip()
+        return base + "\n\n## 相关主题\n\n" + expected_relations + "\n"
+
+    next_heading = len(lines)
+    for idx in range(relations_heading + 1, len(lines)):
+        if lines[idx].startswith("## ") and lines[idx].strip() != "## 相关主题":
+            next_heading = idx
+            break
+    output = lines[: relations_heading + 1] + ["", expected_relations]
+    if next_heading < len(lines):
+        output.extend(["", *lines[next_heading:]])
+    return "\n".join(output) + ("\n" if trailing_newline else "")
+
+
+def ownership_relations_span(text: str) -> tuple[int, int] | None:
+    begin = text.find(OWNERSHIP_RELATIONS_BEGIN)
+    if begin == -1:
+        return None
+    end = text.find(OWNERSHIP_RELATIONS_END, begin)
+    if end == -1:
+        return None
+    return begin, end + len(OWNERSHIP_RELATIONS_END)
+
+
+def render_ownership_relations(relations: list[dict]) -> str:
+    lines = [OWNERSHIP_RELATIONS_BEGIN, ""]
+    if not relations:
+        lines.append("> 暂无稳定相关承接。")
+    for relation in sorted(relations, key=lambda item: item["target_stem"]):
+        concept_text = "、".join(relation.get("concepts", [])[:5]) if relation.get("concepts") else "待积累"
+        lines.append(
+            f"- [[{relation['target_stem']}]]"
+            f"（共享 Resource 概念：{concept_text}；"
+            f"来源：`{relation['source_dir']}` ↔ `{relation['target_dir']}`）"
+        )
+    lines.append("")
+    lines.append(OWNERSHIP_RELATIONS_END)
+    return "\n".join(lines)
+
+
+def upsert_ownership_relations_section(text: str, expected_relations: str) -> str:
+    span = ownership_relations_span(text)
+    if span is not None:
+        return text[: span[0]] + expected_relations + text[span[1] :]
+
+    trailing_newline = text.endswith("\n")
+    lines = text[:-1].split("\n") if trailing_newline else text.split("\n")
+    relations_heading = next((idx for idx, line in enumerate(lines) if line.strip() == "## 相关承接"), None)
+    if relations_heading is None:
+        base = text.rstrip()
+        return base + "\n\n## 相关承接\n\n" + expected_relations + "\n"
+
+    next_heading = len(lines)
+    for idx in range(relations_heading + 1, len(lines)):
+        if lines[idx].startswith("## ") and lines[idx].strip() != "## 相关承接":
+            next_heading = idx
+            break
+    output = lines[: relations_heading + 1] + ["", expected_relations]
+    if next_heading < len(lines):
+        output.extend(["", *lines[next_heading:]])
+    return "\n".join(output) + ("\n" if trailing_newline else "")
+
+
 def topic_index_gaps(vault: Path, scopes: list[str], protected: set[str]) -> list[dict]:
     gaps: list[dict] = []
     for topic_dir in resource_topic_dirs(vault, scopes):
@@ -2282,6 +2660,13 @@ def topic_understanding_profiles(notes: list[Note]) -> list[dict]:
             }
         )
     return items
+
+
+def topic_relation_candidates(notes: list[Note]) -> list[dict]:
+    profiles = resource_topic_profiles(notes)
+    return knowledge_model.topic_relation_candidates(
+        {topic: to_model_topic_profile(profile) for topic, profile in profiles.items()}
+    )
 
 
 def ownership_understanding_profiles(notes: list[Note]) -> list[dict]:
@@ -2646,22 +3031,54 @@ def git_mv_checked(vault: Path, old: str, new: str) -> tuple[bool, str]:
     return False, completed.stderr.strip() or completed.stdout.strip() or "git mv failed"
 
 
+def repair_structural_incoming_wikilinks(
+    vault: Path,
+    report: dict,
+    old_note_rel: str,
+    new_note_rel: str,
+) -> None:
+    protected = set(report.get("protected_paths", []))
+    notes, _by_name, _file_stems, _attachment_targets = build_index(vault, report.get("scope", DEFAULT_SCOPES), protected)
+    old_path = normalize_relpath(old_note_rel)
+    target_stem = Path(new_note_rel).stem
+    applied = report["applied"].setdefault("broken_links", [])
+    for note in sorted(notes, key=lambda item: item.path):
+        note_path = vault / note.path
+        if not note_path.exists() or is_protected(note.path, protected):
+            continue
+        text = note_path.read_text(encoding="utf-8")
+        new_text = text
+        repaired: list[str] = []
+        for raw in WIKILINK_RE.findall(text):
+            if not has_path_component(raw):
+                continue
+            if old_path not in set(markdown_link_path_candidates(wikilink_target(raw))):
+                continue
+            new_text = replace_wikilink(new_text, raw, target_stem)
+            repaired.append(raw)
+        if new_text == text:
+            continue
+        note_path.write_text(new_text, encoding="utf-8")
+        for raw in repaired:
+            applied.append({"source": note.path, "old": raw, "new": target_stem})
+
+
 def apply_structural_reorganization(vault: Path, report: dict) -> None:
     applied = report["applied"].setdefault("structural_moves", [])
     for item in report.get("understanding", {}).get("structure_candidates", []):
         if not item.get("fixable"):
-            report["skipped_uncertain"].append({"type": "structural_reunderstanding", **item})
+            append_skipped_once(report, {"type": "structural_reunderstanding", **item})
             continue
         source = item["source"]
         target = item["target"]
         if not source or not target or not (vault / source).exists():
-            report["skipped_uncertain"].append({"type": "structural_missing_note", **item})
+            append_skipped_once(report, {"type": "structural_missing_note", **item})
             continue
         moved_sources: list[dict] = []
         moved_note = False
         ok, error = git_mv_checked(vault, source, target)
         if not ok:
-            report["skipped_uncertain"].append({"type": "structural_git_mv_failed", "error": error, **item})
+            append_skipped_once(report, {"type": "structural_git_mv_failed", "error": error, **item})
             continue
         moved_note = True
         failed_source_move: str | None = None
@@ -2678,10 +3095,12 @@ def apply_structural_reorganization(vault: Path, report: dict) -> None:
         if failed_source_move:
             # Keep the note move. The next source-file policy pass will report
             # the remaining source issue instead of hiding it.
-            report["skipped_uncertain"].append(
-                {"type": "structural_source_git_mv_failed", "error": failed_source_move, **item}
+            append_skipped_once(
+                report,
+                {"type": "structural_source_git_mv_failed", "error": failed_source_move, **item},
             )
         if moved_note:
+            repair_structural_incoming_wikilinks(vault, report, source, target)
             applied.append(
                 {
                     "source": source,
@@ -2751,7 +3170,7 @@ def apply_topic_indexes(vault: Path, report: dict) -> None:
     for item in report.get("topic_index_gaps", []):
         status = item.get("status")
         if not item.get("fixable"):
-            report["skipped_uncertain"].append({"type": "topic_index_gap", **item})
+            append_skipped_once(report, {"type": "topic_index_gap", **item})
             continue
         readme_rel = item["readme"]
         readme_path = vault / readme_rel
@@ -2789,6 +3208,168 @@ def apply_understanding_profiles(vault: Path, report: dict) -> None:
             readme_path.write_text(new_text, encoding="utf-8")
         item["applied_status"] = "updated"
         applied.append({"topic_dir": item["topic_dir"], "readme": readme_rel, "status": "updated"})
+
+
+def apply_topic_relations(vault: Path, report: dict) -> None:
+    protected = set(report.get("protected_paths", []))
+    applied = report["applied"].setdefault("topic_relations", [])
+    relations_by_topic: dict[str, list[dict]] = defaultdict(list)
+    accepted_candidates: list[dict] = []
+
+    for item in report.get("understanding", {}).get("topic_relation_candidates", []):
+        source_dir = item.get("source_dir", "")
+        target_dir = item.get("target_dir", "")
+        if not source_dir or not target_dir:
+            continue
+        source_readme = (Path(source_dir) / "README.md").as_posix()
+        target_readme = (Path(target_dir) / "README.md").as_posix()
+        blocked = False
+        for topic_dir, readme_rel in ((source_dir, source_readme), (target_dir, target_readme)):
+            if is_protected(topic_dir + "/", protected) or is_protected(readme_rel, protected):
+                report["skipped_uncertain"].append(
+                    {
+                        "type": "topic_relation_protected_readme",
+                        "source_dir": source_dir,
+                        "target_dir": target_dir,
+                        "readme": readme_rel,
+                    }
+                )
+                blocked = True
+            elif not (vault / readme_rel).exists():
+                report["skipped_uncertain"].append(
+                    {
+                        "type": "topic_relation_missing_readme",
+                        "source_dir": source_dir,
+                        "target_dir": target_dir,
+                        "readme": readme_rel,
+                    }
+                )
+                blocked = True
+        if blocked:
+            continue
+        concepts = item.get("concepts", [])
+        relations_by_topic[source_dir].append(
+            {
+                "target_dir": target_dir,
+                "target_stem": Path(target_dir).name,
+                "target_readme_stem": (Path(target_dir) / "README").as_posix(),
+                "concepts": concepts,
+            }
+        )
+        relations_by_topic[target_dir].append(
+            {
+                "target_dir": source_dir,
+                "target_stem": Path(source_dir).name,
+                "target_readme_stem": (Path(source_dir) / "README").as_posix(),
+                "concepts": concepts,
+            }
+        )
+        accepted_candidates.append(item)
+
+    for topic_dir in resource_topic_dirs(vault, report["scope"]):
+        topic_rel = topic_dir.relative_to(vault).as_posix()
+        if topic_rel in relations_by_topic:
+            continue
+        readme_rel = (Path(topic_rel) / "README.md").as_posix()
+        readme_path = vault / readme_rel
+        if not readme_path.exists():
+            continue
+        if is_protected(topic_rel + "/", protected) or is_protected(readme_rel, protected):
+            continue
+        text = readme_path.read_text(encoding="utf-8")
+        if topic_relations_span(text) is not None:
+            relations_by_topic[topic_rel] = []
+
+    changed_topics: set[str] = set()
+    for topic_dir, relations in sorted(relations_by_topic.items()):
+        readme_rel = (Path(topic_dir) / "README.md").as_posix()
+        readme_path = vault / readme_rel
+        text = readme_path.read_text(encoding="utf-8")
+        expected_relations = render_topic_relations(relations)
+        new_text = upsert_topic_relations_section(text, expected_relations)
+        if new_text == text:
+            continue
+        readme_path.write_text(new_text, encoding="utf-8")
+        changed_topics.add(topic_dir)
+        applied.append(
+            {
+                "topic_dir": topic_dir,
+                "readme": readme_rel,
+                "relation_count": len(relations),
+            }
+        )
+
+    for item in accepted_candidates:
+        item["applied_status"] = "updated" if (
+            item["source_dir"] in changed_topics or item["target_dir"] in changed_topics
+        ) else "current"
+
+
+def apply_ownership_relations(vault: Path, report: dict) -> None:
+    protected = set(report.get("protected_paths", []))
+    notes, _by_name, _file_stems, _attachment_targets = build_index(vault, report["scope"], protected)
+    areas_by_topic = {
+        topic_dir: area
+        for area in notes
+        if (topic_dir := ownership_area_source_topic(area)) is not None
+    }
+    relations_by_area: dict[str, list[dict]] = defaultdict(list)
+    applied = report["applied"].setdefault("ownership_relations", [])
+
+    for item in report.get("understanding", {}).get("topic_relation_candidates", []):
+        source_dir = item.get("source_dir", "")
+        target_dir = item.get("target_dir", "")
+        source_area = areas_by_topic.get(source_dir)
+        target_area = areas_by_topic.get(target_dir)
+        if source_area is None or target_area is None:
+            continue
+        if source_area.protected or target_area.protected:
+            report["skipped_uncertain"].append(
+                {
+                    "type": "ownership_relation_protected_area",
+                    "source_dir": source_dir,
+                    "target_dir": target_dir,
+                    "source_area": source_area.path,
+                    "target_area": target_area.path,
+                }
+            )
+            continue
+        concepts = item.get("concepts", [])[:5]
+        relations_by_area[source_area.path].append(
+            {
+                "target_area": target_area.path,
+                "target_stem": Path(target_area.path).stem,
+                "source_dir": source_dir,
+                "target_dir": target_dir,
+                "concepts": concepts,
+            }
+        )
+        relations_by_area[target_area.path].append(
+            {
+                "target_area": source_area.path,
+                "target_stem": Path(source_area.path).stem,
+                "source_dir": target_dir,
+                "target_dir": source_dir,
+                "concepts": concepts,
+            }
+        )
+
+    by_path = {note.path: note for note in notes}
+    for area in notes:
+        if not area.path.startswith("Areas/") or area.protected or area.path in relations_by_area:
+            continue
+        text = area.abs_path.read_text(encoding="utf-8", errors="replace")
+        if ownership_relations_span(text) is not None:
+            relations_by_area[area.path] = []
+
+    for area_rel, relations in sorted(relations_by_area.items()):
+        area = by_path[area_rel]
+        text = area.abs_path.read_text(encoding="utf-8")
+        new_text = upsert_ownership_relations_section(text, render_ownership_relations(relations))
+        if new_text == text:
+            continue
+        area.abs_path.write_text(new_text, encoding="utf-8")
+        applied.append({"area": area_rel, "relation_count": len(relations)})
 
 
 def apply_ownership_area_creations(vault: Path, report: dict, date: str) -> None:
@@ -2873,12 +3454,11 @@ def apply_ownership_area_profile_updates(vault: Path, report: dict) -> None:
             continue
         area_text = area.abs_path.read_text(encoding="utf-8")
         new_area_text = upsert_understanding_profile_section(area_text, item["expected_profile"])
-        for material_rel in item.get("missing_index_links", []):
-            new_area_text = upsert_section_bullet(
-                new_area_text,
-                "资料索引",
-                f"- [[{Path(material_rel).stem}]]（自动承接：`{item['topic_dir']}`）",
-            )
+        new_area_text = upsert_area_scope_concepts(
+            new_area_text,
+            item.get("expected_scope_concepts", ""),
+        )
+        new_area_text = upsert_ownership_index_section(new_area_text, item["expected_index"])
         if new_area_text != area_text:
             area.abs_path.write_text(new_area_text, encoding="utf-8")
 
@@ -3192,7 +3772,9 @@ def append_log(vault: Path, report: dict, date: str) -> None:
         f"- 主题索引：{len(report['applied'].get('topic_indexes', []))}\n"
         f"- 结构迁移：{len(report['applied'].get('structural_moves', []))}\n"
         f"- 概念画像：{len(report['applied'].get('understanding_profiles', []))}\n"
+        f"- 主题关联：{len(report['applied'].get('topic_relations', []))}\n"
         f"- 新建承接：{len(report['applied'].get('ownership_areas', []))}\n"
+        f"- 承接关联：{len(report['applied'].get('ownership_relations', []))}\n"
         f"- 承接刷新：{len(report['applied'].get('ownership_area_profiles', []))}\n"
         f"- 承接重构：{len(report['applied'].get('ownership_structure', []))}\n"
         f"- 承接分化：{len(report['applied'].get('ownership_splits', []))}\n"
@@ -3202,19 +3784,27 @@ def append_log(vault: Path, report: dict, date: str) -> None:
     log_path.write_text(old + ("\n" if old and not old.endswith("\n") else "") + entry, encoding="utf-8")
 
 
+def append_skipped_once(report: dict, item: dict) -> None:
+    if item not in report["skipped_uncertain"]:
+        report["skipped_uncertain"].append(item)
+
+
 def build_report(vault: Path, scopes: list[str]) -> dict:
     protected = protected_paths(vault)
     notes, by_name, file_stems, attachment_targets = build_index(vault, scopes, protected)
+    safety_notes = structural_safety_notes(vault, scopes, protected, notes)
     empty_stub_findings = empty_stubs(vault, notes, by_name)
     topic_index_findings = topic_index_gaps(vault, scopes, protected)
     understanding_candidates = understanding_link_candidates(notes)
-    structure_candidates = structural_reunderstanding_candidates(vault, notes, protected)
+    structure_candidates = structural_reunderstanding_candidates(vault, notes, protected, safety_notes)
+    split_decisions = resource_topic_split_decisions(notes)
     profile_findings = understanding_profile_gaps(vault, notes, protected)
     ownership_area_findings = ownership_area_candidates(vault, notes, protected)
     ownership_area_profile_findings = ownership_area_profile_gaps(vault, notes, protected)
     ownership_structure_findings = ownership_structure_candidates(vault, notes, protected)
     ownership_split_findings = ownership_split_candidates(vault, notes, protected)
     topic_profiles = topic_understanding_profiles(notes)
+    topic_relation_findings = topic_relation_candidates(notes)
     owner_profiles = ownership_understanding_profiles(notes)
     report = {
         "scope": scopes,
@@ -3233,11 +3823,13 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
         "understanding": {
             "link_candidates": understanding_candidates,
             "structure_candidates": structure_candidates,
+            "resource_topic_split_decisions": split_decisions,
             "ownership_area_candidates": ownership_area_findings,
             "ownership_area_profile_gaps": ownership_area_profile_findings,
             "ownership_structure_candidates": ownership_structure_findings,
             "ownership_split_candidates": ownership_split_findings,
             "topic_profiles": topic_profiles,
+            "topic_relation_candidates": topic_relation_findings,
             "ownership_profiles": owner_profiles,
         },
         "applied": {
@@ -3250,7 +3842,9 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
             "understanding_links": [],
             "structural_moves": [],
             "understanding_profiles": [],
+            "topic_relations": [],
             "ownership_areas": [],
+            "ownership_relations": [],
             "ownership_area_profiles": [],
             "ownership_structure": [],
             "ownership_splits": [],
@@ -3263,10 +3857,12 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
             "understanding_profile_gaps": profile_findings,
             "understanding_link_candidates": understanding_candidates,
             "structure_candidates": structure_candidates,
+            "resource_topic_split_decisions": split_decisions,
             "ownership_area_candidates": ownership_area_findings,
             "ownership_area_profile_gaps": ownership_area_profile_findings,
             "ownership_structure_candidates": ownership_structure_findings,
             "ownership_split_candidates": ownership_split_findings,
+            "topic_relation_candidates": topic_relation_findings,
         },
         "skipped_uncertain": [],
         "verification": {},
@@ -3283,7 +3879,7 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
             report["skipped_uncertain"].append({"type": "source_file_policy", **item})
     for item in report["understanding"]["structure_candidates"]:
         if not item.get("fixable"):
-            report["skipped_uncertain"].append({"type": "structural_reunderstanding", **item})
+            append_skipped_once(report, {"type": "structural_reunderstanding", **item})
     for item in report["understanding_profile_gaps"]:
         if not item.get("fixable"):
             report["skipped_uncertain"].append({"type": "understanding_profile_gap", **item})
@@ -3305,6 +3901,7 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
 def refresh_report_findings(vault: Path, report: dict, include_structure: bool = True) -> tuple[list[Note], dict[str, list[Note]], set[str], set[str]]:
     protected = set(report.get("protected_paths", []))
     notes, by_name, file_stems, attachment_targets = build_index(vault, report["scope"], protected)
+    safety_notes = structural_safety_notes(vault, report["scope"], protected, notes)
     report["duplicates"] = duplicate_groups(notes)
     report["broken_links"] = broken_links(notes, by_name, file_stems, attachment_targets)
     report["empty_stubs"] = empty_stubs(vault, notes, by_name)
@@ -3316,22 +3913,31 @@ def refresh_report_findings(vault: Path, report: dict, include_structure: bool =
     report["invalid_fingerprints"] = invalid_fingerprints(notes)
     report["invalid_frontmatter"] = invalid_frontmatter_list(notes)
     report["understanding"]["link_candidates"] = understanding_link_candidates(notes)
+    report["understanding"]["resource_topic_split_decisions"] = resource_topic_split_decisions(notes)
     report["understanding"]["ownership_area_candidates"] = ownership_area_candidates(vault, notes, protected)
     report["understanding"]["ownership_area_profile_gaps"] = ownership_area_profile_gaps(vault, notes, protected)
     report["understanding"]["ownership_structure_candidates"] = ownership_structure_candidates(vault, notes, protected)
     report["understanding"]["ownership_split_candidates"] = ownership_split_candidates(vault, notes, protected)
     report["understanding"]["topic_profiles"] = topic_understanding_profiles(notes)
+    report["understanding"]["topic_relation_candidates"] = topic_relation_candidates(notes)
     report["understanding"]["ownership_profiles"] = ownership_understanding_profiles(notes)
     if include_structure:
-        report["understanding"]["structure_candidates"] = structural_reunderstanding_candidates(vault, notes, protected)
+        report["understanding"]["structure_candidates"] = structural_reunderstanding_candidates(
+            vault,
+            notes,
+            protected,
+            safety_notes,
+        )
     report["report_only"]["topic_index_gaps"] = report["topic_index_gaps"]
     report["report_only"]["understanding_profile_gaps"] = report["understanding_profile_gaps"]
     report["report_only"]["understanding_link_candidates"] = report["understanding"]["link_candidates"]
     report["report_only"]["structure_candidates"] = report["understanding"].get("structure_candidates", [])
+    report["report_only"]["resource_topic_split_decisions"] = report["understanding"]["resource_topic_split_decisions"]
     report["report_only"]["ownership_area_candidates"] = report["understanding"]["ownership_area_candidates"]
     report["report_only"]["ownership_area_profile_gaps"] = report["understanding"]["ownership_area_profile_gaps"]
     report["report_only"]["ownership_structure_candidates"] = report["understanding"]["ownership_structure_candidates"]
     report["report_only"]["ownership_split_candidates"] = report["understanding"]["ownership_split_candidates"]
+    report["report_only"]["topic_relation_candidates"] = report["understanding"]["topic_relation_candidates"]
     for item in report["broken_links"]:
         if item["status"] != "unique":
             skipped = {"type": "ambiguous_broken_link", **item}
@@ -3426,9 +4032,17 @@ def markdown_report(report: dict) -> str:
         f"- `{item['topic_dir']}` → `{item['readme']}`（{item['status']}）"
         for item in report["applied"].get("understanding_profiles", [])
     ]
+    topic_relation_applied_lines = [
+        f"- `{item['topic_dir']}` → `{item['readme']}`（{item['relation_count']} 个相关主题）"
+        for item in report["applied"].get("topic_relations", [])
+    ]
     ownership_area_applied_lines = [
         f"- `{item['topic_dir']}` → `{item['target']}`（{item['material_count']} 篇；{', '.join(item.get('concepts', [])[:4])}）"
         for item in report["applied"].get("ownership_areas", [])
+    ]
+    ownership_relation_applied_lines = [
+        f"- `{item['area']}`（{item['relation_count']} 个相关承接）"
+        for item in report["applied"].get("ownership_relations", [])
     ]
     ownership_area_profile_applied_lines = [
         f"- `{item['area']}` ← `{item['topic_dir']}`（{item['material_count']} 篇；{item.get('reverse_updates', 0)} 条回链）"
@@ -3452,6 +4066,11 @@ def markdown_report(report: dict) -> str:
         f"- `{item['source']}` → `{item.get('target') or item.get('to_topic')}`（{item.get('status')}；{item.get('reason')}）"
         for item in report.get("understanding", {}).get("structure_candidates", [])
         if (item["source"], item.get("target", "")) not in structural_applied_pairs
+    ]
+    resource_split_decision_lines = [
+        f"- `{item['topic_dir']}`：{item['status']}；{item['reason']}"
+        + (f"；→ `{item['to_topic']}`（{item['material_count']} / {item['topic_material_count']} 篇）" if item.get("to_topic") else "")
+        for item in report.get("understanding", {}).get("resource_topic_split_decisions", [])
     ]
     understanding_applied = report["applied"].get("understanding_links", [])
     understanding_applied_pairs = {(item["source"], item["target"]) for item in understanding_applied}
@@ -3511,9 +4130,18 @@ def markdown_report(report: dict) -> str:
         f"- `{item['topic_dir']}`：{', '.join(item.get('concepts', [])[:6]) or '待积累'}"
         for item in report.get("understanding", {}).get("topic_profiles", [])[:8]
     ]
+    topic_relation_lines = [
+        f"- `{item['source_dir']}` ↔ `{item['target_dir']}`（{', '.join(item.get('concepts', [])[:5])}）"
+        for item in report.get("understanding", {}).get("topic_relation_candidates", [])
+        if not item.get("applied_status")
+    ]
     ownership_profile_lines = [
         f"- `{item['path']}`：{', '.join(item.get('concepts', [])[:6]) or '待积累'}"
         for item in report.get("understanding", {}).get("ownership_profiles", [])[:8]
+    ]
+    residual_broken_link_lines = [
+        f"- `{item['source']}` 中 `[[{item['link']}]]` → {', '.join('`' + path + '`' for path in item.get('matches', [])) or '无候选'}"
+        for item in report.get("verification", {}).get("residual_broken_links", [])
     ]
     lines = [
         "## 范围与扫描结果",
@@ -3529,7 +4157,9 @@ def markdown_report(report: dict) -> str:
         "- 空残骸清理：" + ("\n" + "\n".join(empty_stub_lines) if empty_stub_lines else "无"),
         "- 主题索引：" + ("\n" + "\n".join(topic_index_applied_lines) if topic_index_applied_lines else "无"),
         "- 概念画像：" + ("\n" + "\n".join(profile_applied_lines) if profile_applied_lines else "无"),
+        "- 主题关联：" + ("\n" + "\n".join(topic_relation_applied_lines) if topic_relation_applied_lines else "无"),
         "- 新建承接 Area：" + ("\n" + "\n".join(ownership_area_applied_lines) if ownership_area_applied_lines else "无"),
+        "- 关联承接 Area：" + ("\n" + "\n".join(ownership_relation_applied_lines) if ownership_relation_applied_lines else "无"),
         "- 刷新承接 Area：" + ("\n" + "\n".join(ownership_area_profile_applied_lines) if ownership_area_profile_applied_lines else "无"),
         "- 重构承接 Area：" + ("\n" + "\n".join(ownership_structure_applied_lines) if ownership_structure_applied_lines else "无"),
         "- 分化承接 Area：" + ("\n" + "\n".join(ownership_split_applied_lines) if ownership_split_applied_lines else "无"),
@@ -3541,6 +4171,8 @@ def markdown_report(report: dict) -> str:
         f"- 孤岛笔记：{len(report['orphan_notes']) if report['orphan_notes'] else '无'}",
         "- 重新理解补链候选：" + ("\n" + "\n".join(understanding_candidate_lines) if understanding_candidate_lines else "无"),
         "- 重新理解结构候选：" + ("\n" + "\n".join(structural_candidate_lines) if structural_candidate_lines else "无"),
+        "- Resource topic 拆分判断：" + ("\n" + "\n".join(resource_split_decision_lines) if resource_split_decision_lines else "无"),
+        "- Resource topic 关联候选：" + ("\n" + "\n".join(topic_relation_lines) if topic_relation_lines else "无"),
         "- 当前主题画像：" + ("\n" + "\n".join(topic_profile_lines) if topic_profile_lines else "无"),
         "- 当前承接画像：" + ("\n" + "\n".join(ownership_profile_lines) if ownership_profile_lines else "无"),
         "- 待补元数据：" + ("\n" + "\n".join(metadata_pending_lines) if metadata_pending_lines else "无"),
@@ -3562,6 +4194,7 @@ def markdown_report(report: dict) -> str:
         "## 验证结果",
         f"- git status：{report['verification'].get('git_status', '未检查')}",
         f"- 自检：{report['verification'].get('self_check', '未检查')}",
+        "- 残留结构断链：" + ("\n" + "\n".join(residual_broken_link_lines) if residual_broken_link_lines else "无"),
         "- commit：无",
         "",
     ]
@@ -3608,10 +4241,20 @@ def safe_self_check(vault: Path, report: dict) -> None:
         if not (vault / item["readme"]).exists():
             profile_missing = True
             break
+    topic_relation_missing = False
+    for item in report["applied"].get("topic_relations", []):
+        if not (vault / item["readme"]).exists():
+            topic_relation_missing = True
+            break
     ownership_area_missing = False
     for item in report["applied"].get("ownership_areas", []):
         if not (vault / item["target"]).exists():
             ownership_area_missing = True
+            break
+    ownership_relation_missing = False
+    for item in report["applied"].get("ownership_relations", []):
+        if not (vault / item["area"]).exists():
+            ownership_relation_missing = True
             break
     ownership_area_profile_missing = False
     for item in report["applied"].get("ownership_area_profiles", []):
@@ -3642,6 +4285,24 @@ def safe_self_check(vault: Path, report: dict) -> None:
                 break
         if structural_missing:
             break
+    residual_broken_links: list[dict] = []
+    structural_old_paths = {
+        normalize_relpath(item["source"])
+        for item in report["applied"].get("structural_moves", [])
+        if item.get("source")
+    }
+    if structural_old_paths:
+        protected = set(report.get("protected_paths", []))
+        notes, by_name, file_stems, attachment_targets = build_index(
+            vault,
+            report.get("scope", DEFAULT_SCOPES),
+            protected,
+        )
+        for item in broken_links(notes, by_name, file_stems, attachment_targets):
+            link_paths = set(markdown_link_path_candidates(item["link"]))
+            if structural_old_paths & link_paths:
+                residual_broken_links.append(item)
+    report["verification"]["residual_broken_links"] = residual_broken_links
     report["verification"]["self_check"] = (
         "通过"
         if not bad_delete
@@ -3650,11 +4311,14 @@ def safe_self_check(vault: Path, report: dict) -> None:
         and not source_missing
         and not topic_index_missing
         and not profile_missing
+        and not topic_relation_missing
         and not ownership_area_missing
+        and not ownership_relation_missing
         and not ownership_area_profile_missing
         and not ownership_structure_missing
         and not ownership_split_missing
         and not structural_missing
+        and not residual_broken_links
         else "未通过"
     )
 
@@ -3752,6 +4416,8 @@ def main(argv: list[str]) -> int:
         notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report, include_structure=False)
         apply_metadata(notes, report)
         notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report, include_structure=False)
+        apply_topic_relations(vault, report)
+        apply_ownership_relations(vault, report)
         if not args.no_log:
             append_log(vault, report, date)
         safe_self_check(vault, report)

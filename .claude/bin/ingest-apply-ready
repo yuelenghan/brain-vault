@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""Run ingest first-pass apply for reviewed ready candidates with fixed report paths."""
+
+from __future__ import annotations
+
+import re
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+SCRIPT = Path(".claude/skills/ingest/scripts/ingest.py")
+REPORT_DIR = Path(os.environ.get("INGEST_TEST_REPORT_DIR", "/tmp")).resolve()
+JSON_REPORT = str(REPORT_DIR / "ingest.json")
+MARKDOWN_REPORT = str(REPORT_DIR / "ingest.md")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?$")
+
+
+def main(argv: list[str]) -> int:
+    if not argv or not DATE_RE.match(argv[0]):
+        print("ingest-apply-ready: expected date, then optional --only Inbox/path and --commit flags", file=sys.stderr)
+        return 2
+    passthrough: list[str] = []
+    index = 1
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--commit":
+            passthrough.append(arg)
+            index += 1
+            continue
+        if arg == "--only" and index + 1 < len(argv):
+            selected = argv[index + 1]
+            if not selected.startswith("Inbox/"):
+                print("ingest-apply-ready: --only must be a relative Inbox path", file=sys.stderr)
+                return 2
+            passthrough.extend([arg, selected])
+            index += 2
+            continue
+        print("ingest-apply-ready: unsupported arguments", file=sys.stderr)
+        return 2
+    command = [
+        "python3",
+        str(SCRIPT),
+        "--mode",
+        "apply-ready",
+        "--json",
+        JSON_REPORT,
+        "--markdown",
+        MARKDOWN_REPORT,
+        "--date",
+        argv[0],
+    ]
+    command.extend(passthrough)
+    return subprocess.run(command, check=False).returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
