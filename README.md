@@ -1,10 +1,12 @@
 # brain-vault
 
-brain-vault 是一个面向 AI coding agents 的个人知识库模板。它用 PARA 方法组织资料，并内置 Claude Code、Copilot CLI 和 Codex CLI 支持。
+把混乱丢进来，得到一个可链接、可维护的 PARA + Inbox 知识库。
+
+brain-vault 是一个面向 AI coding agents 的个人知识库模板。它用 `Inbox/` 接住网页、文档、会议记录、音视频转录和截图，通过 `/ingest` 分流新材料，并用 `/meditate` 持续优化已整理笔记。内置 Claude Code、Copilot CLI 和 Codex CLI 支持。
 
 适合用来：
 
-- 收集网页、文档、会议记录、音视频转录等材料；
+- 收集网页、文档、会议记录、音视频转录、截图等材料；
 - 把零散输入整理成项目、长期领域、资料库和归档；
 - 让 AI agent 根据你的身份、目标和偏好协助维护个人知识库。
 
@@ -268,11 +270,13 @@ Windows PowerShell：
 
 # brain-vault (English)
 
-brain-vault is a personal knowledge-base template built for AI coding agents. It organizes material with the PARA method and ships with built-in support for Claude Code, Copilot CLI, and Codex CLI.
+Drop chaos in. Get a linked, maintainable PARA + Inbox vault out.
+
+brain-vault is an AI-agent-ready personal knowledge-base template. It catches web pages, documents, meeting notes, audio/video transcripts, and screenshots in `Inbox/`, routes new material with `/ingest`, and keeps organized notes improving with `/meditate`. It ships with built-in support for Claude Code, Copilot CLI, and Codex CLI.
 
 It is well suited for:
 
-- Collecting web pages, documents, meeting notes, audio/video transcripts, and other material;
+- Collecting web pages, documents, meeting notes, audio/video transcripts, screenshots, and other material;
 - Turning scattered input into projects, long-term areas, a resource library, and an archive;
 - Letting an AI agent help maintain your knowledge base according to your identity, goals, and preferences.
 
