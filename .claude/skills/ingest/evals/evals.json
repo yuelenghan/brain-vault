@@ -132,7 +132,7 @@
     {
       "id": 10,
       "prompt": "在一个临时 brain vault 中整理 Inbox。场景：Inbox/paper.pdf 经 canonical prepare 已成功生成 Inbox/paper.md，但 Markdown 里有 PDF 双栏/表格造成的版面噪声。执行整理时应继续基于 paper.md 提炼，或在信息不足时留在 Inbox。",
-      "expected_output": "PDF 自动转换只经过 .claude/bin/safe-markitdown；不能为了获得更干净文本再调用 pdftotext、pdfplumber、pypdf、OCR 或手写 Python PDF 抽取。若 paper.md 可用，则整理 Markdown，并把原始 PDF 放到目标 note 同级 lowercase source/ 目录且改成整理后 Markdown 同 stem；若 paper.md 不可用，则 PDF 留在 Inbox 并写清原因。",
+      "expected_output": "PDF 自动转换只经过 .claude/bin/safe-markitdown；不能为了获得更干净文本再调用 pdftotext、pdfplumber、pypdf、OCR 或手写 Python PDF 抽取。若 paper.md 可用，则整理 Markdown 并保留原始 PDF；若 paper.md 不可用，则 PDF 留在 Inbox 并写清原因。",
       "files": [],
       "expectations": [
         "先运行 ingest.py prepare，并由脚本对 Inbox/paper.pdf 调用 .claude/bin/safe-markitdown。",
@@ -145,13 +145,13 @@
     {
       "id": 11,
       "prompt": "在一个临时 brain vault 中整理 Inbox。场景：Inbox/2606.30317v1.pdf 成功转换成 Markdown，并被整理为 Resources/Agent Platforms/MCP Server Architecture Patterns for LLM-Integrated Applications.md。原始 PDF 文件名是下载编号，不适合长期阅读。",
-      "expected_output": "原始 PDF 跟随整理稿进入目标 note 同级 lowercase source/ 目录，并改成整理后 Markdown 同 stem 的 PDF；整理后的 Markdown frontmatter 写入 source_file，并在正文整理标记后单独添加可点击的 Original file wikilink；不能只在 frontmatter 里写 source_file。",
+      "expected_output": "原始 PDF 跟随整理稿改成有意义的同名 PDF；整理后的 Markdown frontmatter 写入 source_file，并在正文整理标记后单独添加可点击的 原始文件 wikilink；不能只在 frontmatter 里写 source_file。",
       "files": [],
       "expectations": [
-        "PDF 通过 git mv 移动到 Resources/Agent Platforms/source/MCP Server Architecture Patterns for LLM-Integrated Applications.pdf；不能放在 topic 根目录、Sources/ 或保留下载编号。",
-        "Markdown frontmatter 的 source_file 指向 source/MCP Server Architecture Patterns for LLM-Integrated Applications.pdf。",
+        "PDF 通过 git mv 移动到目标 topic 目录或 Sources 子目录，并优先改名为 MCP Server Architecture Patterns for LLM-Integrated Applications.pdf。",
+        "Markdown frontmatter 的 source_file 指向改名后的实际 PDF 路径。",
         "整理标记保持精确格式 > 整理自 Inbox，<date>，不要把原始文件信息塞进同一行。",
-        "整理标记后有单独一行 Original file: [[source/MCP Server Architecture Patterns for LLM-Integrated Applications.pdf]]，且该 PDF 文件实际存在。",
+        "整理标记后有单独一行 原始文件：[[MCP Server Architecture Patterns for LLM-Integrated Applications.pdf]]，且该 PDF 文件实际存在。",
         "不能只依赖 source_file 元数据；用户在 Obsidian 正文中必须能直接点击打开原始 PDF。"
       ]
     },

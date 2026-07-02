@@ -156,6 +156,20 @@ Original file: [[Sources/Research Whitepaper.pdf]]
         self.assertEqual("Resources/Data Semantic Layer/source/Trusted AI Research Whitepaper.pdf", finding["expected"])
         self.assertEqual("fixable", finding["status"])
 
+    def test_standalone_project_html_deliverable_is_not_source_file_anomaly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            project = vault / "Projects"
+            project.mkdir(parents=True)
+            (project / "AI-Agent-Second-Brain-Presentation.html").write_text(
+                "<!doctype html><title>AI Agent Second Brain</title>",
+                encoding="utf-8",
+            )
+
+            report = optimize_vault.build_report(vault, ["Projects"])
+
+        self.assertEqual([], report["source_file_anomalies"])
+
 
 if __name__ == "__main__":
     unittest.main()

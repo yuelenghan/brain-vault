@@ -12,6 +12,8 @@
 !.claude/ingest.ps1
 !.claude/bin/
 .claude/bin/*
+!.claude/bin/ingest-apply-ready
+!.claude/bin/ingest-apply-ready.cmd
 !.claude/bin/ingest-apply-duplicates
 !.claude/bin/ingest-apply-duplicates.cmd
 !.claude/bin/ingest-prepare

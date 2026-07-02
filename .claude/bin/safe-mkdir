@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Safe mkdir -p wrapper for brain-vault ingest work."""
+"""Safe mkdir -p wrapper for brain-vault organize work."""
 
 from __future__ import annotations
 

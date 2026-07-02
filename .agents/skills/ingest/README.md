@@ -5,7 +5,7 @@
 
 ## 整理逻辑源与三路径
 
-当前 brain 的整理逻辑有多套 AI 工具入口：`.claude/skills/ingest/SKILL.md` 服务 Claude Code/headless 且作为 canonical 规则源，`.agents/skills/ingest/SKILL.md`、`.codex/skills/ingest/SKILL.md` 与 `.copilot/skills/ingest/SKILL.md` 都是薄入口并读取 `.claude` 规则。Codex 会话内仍由 `.agents` 这份 skill 触发，但运行时必须转读 `.claude` canonical。CronCreate 定时和 `.claude/ingest.py` 离线兜底也由 `.claude` 副本承接。修 skill、脚本或离线整理入口后，必须用临时 vault 跑 `.claude/ingest.sh`（macOS / Linux）或 `.claude/ingest.ps1`（Windows）验证，覆盖"实际移动 + 提交 + 日志"完整路径，不要只看 Inbox 是否为空。
+当前 brain 的整理逻辑有多套 AI 工具入口：`.claude/skills/ingest/SKILL.md` 服务 Claude Code/headless 且作为 canonical 规则源，`.agents/skills/ingest/SKILL.md`、`.codex/skills/ingest/SKILL.md` 与 `.copilot/skills/ingest/SKILL.md` 都是薄入口并读取 `.claude` 规则。Codex 会话内仍由 `.agents` 这份 skill 触发，但运行时必须转读 `.claude` canonical。CronCreate 定时和 `.claude/ingest.py` 离线兜底也由 `.claude` 副本承接，平台入口是 `.claude/ingest.sh`（macOS / Linux）与 `.claude/ingest.ps1`（Windows）。修 skill、脚本或离线整理入口后，必须用临时 vault 跑 `.claude/ingest.sh` 或 `.claude/ingest.ps1` 验证，覆盖"实际移动 + 提交 + 日志"完整路径，不要只看 Inbox 是否为空。
 
 `.agents/skills/ingest/` 只维护 Codex 会话触发与转发说明，不拥有整理脚本、eval 或独立流程；`.claude/` 是 Claude Code/headless 运行副本，维护 `ingest.py`、`ingest.sh`、`ingest.ps1`、`skills/`、`bin/`；`.codex/`、`.copilot/`、`.github/copilot-instructions.md` 也在当前 vault 维护，但只作为 CLI 入口，不拥有整理逻辑。
 

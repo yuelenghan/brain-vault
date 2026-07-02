@@ -16,6 +16,7 @@ except ImportError:
     UnidentifiedImageError = Exception
 
 
+TRUSTED_CWD = "/usr/bin"
 IMAGE_EXTENSIONS = {".jpeg", ".jpg", ".png", ".webp"}
 
 
@@ -48,21 +49,33 @@ def resolve_vault() -> Path:
     return Path.cwd().resolve()
 
 
-def trusted_cwd() -> str:
-    if os.name == "nt":
-        system_root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR")
-        candidates = []
-        if system_root:
-            candidates.append(Path(system_root) / "System32")
-            candidates.append(Path(system_root))
-        candidates.append(Path(tempfile.gettempdir()))
-        for candidate in candidates:
-            if candidate.is_dir():
-                return str(candidate)
-    return "/usr/bin"
+def substantive_text(text: str) -> bool:
+    return len([token for token in text.split() if token.strip()]) >= 6 or len(text.strip()) >= 40
 
 
-def write_image_markdown(candidate: Path, temp_path: Path) -> int:
+def image_ocr_text(candidate: Path, env: dict[str, str]) -> str:
+    try:
+        completed = subprocess.run(
+            ["tesseract", str(candidate), "stdout", "--psm", "6"],
+            check=False,
+            cwd=TRUSTED_CWD,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if completed.returncode != 0:
+        return ""
+    text = "\n".join(line.rstrip() for line in completed.stdout.splitlines() if line.strip()).strip()
+    if not substantive_text(text):
+        return ""
+    return text
+
+
+def write_image_markdown(candidate: Path, temp_path: Path, env: dict[str, str]) -> int:
     if Image is None:
         return fail("Pillow is not installed")
 
@@ -76,15 +89,25 @@ def write_image_markdown(candidate: Path, temp_path: Path) -> int:
     except OSError as exc:
         return fail(f"failed to read image: {exc}")
 
+    ocr_text = image_ocr_text(candidate, env)
+    ocr_section = ""
+    if ocr_text:
+        ocr_section = (
+            "## 自动识别文本\n\n"
+            "以下文字由本机 OCR 从截图中提取，整理时需按原图核验。\n\n"
+            f"{ocr_text}\n\n"
+        )
+
     temp_path.write_text(
         f"# {candidate.stem}\n\n"
-        f"> Screenshot note placeholder, original file: `Inbox/{candidate.name}`.\n\n"
-        "## Image info\n\n"
-        f"- File: `Inbox/{candidate.name}`\n"
-        f"- Format: {image_format}\n"
-        f"- Dimensions: {width} × {height}\n\n"
-        "## To organize\n\n"
-        "Distill topics, key information, and follow-up actions from the original screenshot.\n",
+        f"> 截图笔记占位，原始文件：`Inbox/{candidate.name}`。\n\n"
+        "## 图片信息\n\n"
+        f"- 文件：`Inbox/{candidate.name}`\n"
+        f"- 格式：{image_format}\n"
+        f"- 尺寸：{width} × {height}\n\n"
+        f"{ocr_section}"
+        "## 待整理\n\n"
+        "请结合原始截图内容提炼主题、关键信息和后续动作。\n",
         encoding="utf-8",
     )
     return 0
@@ -96,7 +119,7 @@ def run_markitdown(candidate: Path, temp_path: Path, env: dict[str, str]) -> int
         completed = subprocess.run(
             command,
             check=False,
-            cwd=trusted_cwd(),
+            cwd=TRUSTED_CWD,
             env=env,
         )
     except OSError as exc:
@@ -145,7 +168,7 @@ def main(argv: list[str]) -> int:
     try:
         env = clean_environment()
         if candidate.suffix.lower() in IMAGE_EXTENSIONS:
-            return_code = write_image_markdown(candidate, temp_path)
+            return_code = write_image_markdown(candidate, temp_path, env)
         else:
             return_code = run_markitdown(candidate, temp_path, env)
 

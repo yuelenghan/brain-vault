@@ -3,16 +3,16 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 
 SCRIPT = Path(".claude/skills/ingest/scripts/ingest.py")
-REPORT_DIR = Path(tempfile.gettempdir()).resolve()
-JSON_REPORT = REPORT_DIR / "ingest.json"
-MARKDOWN_REPORT = REPORT_DIR / "ingest.md"
+REPORT_DIR = Path(os.environ.get("INGEST_TEST_REPORT_DIR", "/tmp")).resolve()
+JSON_REPORT = str(REPORT_DIR / "ingest.json")
+MARKDOWN_REPORT = str(REPORT_DIR / "ingest.md")
 
 
 def main(argv: list[str]) -> int:
@@ -21,14 +21,14 @@ def main(argv: list[str]) -> int:
         return 2
     return subprocess.run(
         [
-            sys.executable,
+            "python3",
             str(SCRIPT),
             "--mode",
             "scan",
             "--json",
-            str(JSON_REPORT),
+            JSON_REPORT,
             "--markdown",
-            str(MARKDOWN_REPORT),
+            MARKDOWN_REPORT,
         ],
         check=False,
     ).returncode

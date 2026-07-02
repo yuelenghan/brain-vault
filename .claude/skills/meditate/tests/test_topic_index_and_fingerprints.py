@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -112,6 +113,44 @@ type: index
             [{"topic_dir": "Resources/PKM", "readme": "Resources/PKM/README.md", "status": "created"}],
             report["applied"]["topic_indexes"],
         )
+
+    def test_topic_index_gap_skipped_once_when_apply_retries_protected_readme(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            subprocess.run(["git", "init", "-q"], cwd=vault, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=vault, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=vault, check=True)
+            topic = vault / "Resources" / "PKM"
+            topic.mkdir(parents=True)
+            write_reference(topic / "Article A.md", "Article A")
+            write_reference(topic / "Article B.md", "Article B")
+            write_reference(topic / "Article C.md", "Article C")
+            readme = topic / "README.md"
+            readme.write_text(
+                """---
+title: PKM
+type: index
+---
+
+# PKM
+""",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "Resources"], cwd=vault, check=True)
+            subprocess.run(["git", "commit", "-qm", "init"], cwd=vault, check=True)
+            readme.write_text(readme.read_text(encoding="utf-8") + "\nuser edit\n", encoding="utf-8")
+
+            report = optimize_vault.build_report(vault, ["Resources"])
+            optimize_vault.apply_topic_indexes(vault, report)
+            optimize_vault.apply_topic_indexes(vault, report)
+
+        skipped = [
+            item
+            for item in report["skipped_uncertain"]
+            if item.get("type") == "topic_index_gap"
+            and item.get("topic_dir") == "Resources/PKM"
+        ]
+        self.assertEqual(1, len(skipped))
 
     def test_apply_safe_updates_stale_marker_block_without_touching_manual_text(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
