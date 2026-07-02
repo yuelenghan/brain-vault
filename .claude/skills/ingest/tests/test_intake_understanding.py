@@ -1019,6 +1019,80 @@ commit: abc123
         self.assertEqual("ready", readiness["status"])
         self.assertIn("ingest history", markdown)
 
+    def test_ingest_history_ignores_uncommitted_intermediate_apply_ready_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            (vault / ".claude").mkdir(parents=True)
+            (vault / ".claude" / "ingest.log").write_text(
+                """## 2026-07-02 manual
+- Inbox/RAG.md → Resources/AI Agents/RAG.md
+- 承接笔记：[[AI Agents]]
+commit: 无
+
+## 2026-07-02 15:07 manual
+- Inbox/RAG.md → Resources/Data Semantic Layer/RAG.md
+- 承接笔记：[[数据智能体与语义层]]
+commit: 0123456789abcdef0123456789abcdef01234567
+""",
+                encoding="utf-8",
+            )
+            write_note(
+                vault / "Resources" / "AI Agents" / "README.md",
+                "AI Agents",
+                "index",
+                "Agent orchestration and autonomous workflows.",
+            )
+            write_note(
+                vault / "Resources" / "Data Semantic Layer" / "README.md",
+                "Data Semantic Layer",
+                "index",
+                "Semantic layer, vector store governance, version state, and retrieval units.",
+            )
+            write_note(vault / "Areas" / "AI Agents.md", "AI Agents", "area", "Agent ownership.")
+            write_note(
+                vault / "Areas" / "数据智能体与语义层.md",
+                "数据智能体与语义层",
+                "area",
+                "Semantic layer ownership for vector store governance and retrieval units.",
+            )
+            write_note(
+                vault / "Inbox" / "RAG.md",
+                "RAG",
+                "reference",
+                "RAG vector store governance uses version state and structured retrieval units.",
+            )
+
+            report = ingest.make_report(vault, convert=False)
+
+        rules = [rule for rule in report["intake_rules"] if rule["source"] == "ingest_history"]
+        self.assertEqual(1, len(rules))
+        self.assertEqual("Resources/Data Semantic Layer", rules[0]["topic_path"])
+        self.assertEqual("Areas/数据智能体与语义层.md", rules[0]["suggested_owner"])
+
+    def test_intake_quality_trends_ignore_uncommitted_intermediate_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            (vault / ".claude").mkdir(parents=True)
+            (vault / ".claude" / "ingest.log").write_text(
+                """## 2026-07-02 manual
+- 摄入质量：ready_rate=0.667, ready_for_apply=2, blocked=1, handoff_ready=2, handoff_blocked=1, learning_rules_applied=12
+- 阻断原因：same-name markdown conflict=1
+commit: 无
+
+## 2026-07-02 15:07 manual
+- 摄入质量：ready_rate=1.0, ready_for_apply=3, blocked=0, handoff_ready=3, handoff_blocked=0, learning_rules_applied=12
+- 阻断原因：无
+commit: 0123456789abcdef0123456789abcdef01234567
+""",
+                encoding="utf-8",
+            )
+
+            history = ingest.read_ingest_quality_history(vault)
+
+        self.assertEqual(1, len(history))
+        self.assertEqual(1.0, float(history[0]["metrics"]["ready_rate"]))
+        self.assertEqual({}, history[0]["blockers"])
+
     def test_prepare_report_suggests_target_for_converted_source_material(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp).resolve()
