@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,7 +39,7 @@ TOPIC_RELATIONS_BEGIN = "<!-- BEGIN: topic-relations -->"
 TOPIC_RELATIONS_END = "<!-- END: topic-relations -->"
 OWNERSHIP_RELATIONS_BEGIN = "<!-- BEGIN: ownership-relations -->"
 OWNERSHIP_RELATIONS_END = "<!-- END: ownership-relations -->"
-FIXED_REPORT_DIR = Path("/tmp").resolve()
+FIXED_REPORT_DIR = Path(tempfile.gettempdir()).resolve()
 FIXED_JSON_REPORT = FIXED_REPORT_DIR / "meditate.json"
 FIXED_MARKDOWN_REPORT = FIXED_REPORT_DIR / "meditate.md"
 SOURCE_EXTENSIONS = {

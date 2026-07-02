@@ -892,6 +892,74 @@ exit 0
             self.assertNotIn("Inbox/Loop Metrics.md", staged)
             self.assertNotIn("Inbox/Loop Metrics.csv", staged)
 
+    def test_make_report_pairs_existing_conversion_markdown_without_wrapper_source_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            self.setup_ready_vault(vault)
+            (vault / "Inbox" / "Loop Notes.md").unlink()
+            (vault / "Inbox" / "2606.13392v2.pdf").write_bytes(b"%PDF-1.4 fake paper bytes\n")
+            (vault / "Inbox" / "2606.13392v2.md").write_text(
+                """MiniMax Sparse Attention
+
+Loop Engineering notes about maker checker workflows, verifier evidence, and autonomous coding loops.
+Stop condition design keeps the loop grounded before evidence becomes weak.
+Verifier evidence should be attached to every handoff so meditate can trust the source.
+""",
+                encoding="utf-8",
+            )
+
+            report = ingest.make_report(vault, convert=True, only_paths={"Inbox/2606.13392v2.md"})
+            by_path = {candidate["path"]: candidate for candidate in report["candidates"]}
+
+            self.assertEqual("ready", by_path["Inbox/2606.13392v2.pdf"]["status"])
+            self.assertEqual("Inbox/2606.13392v2.md", by_path["Inbox/2606.13392v2.pdf"]["markdown_path"])
+            self.assertNotIn("Inbox/2606.13392v2.md", by_path)
+            self.assertEqual("ready", report["organization_plan"]["Inbox/2606.13392v2.pdf"]["status"])
+
+            ingest.apply_ready(vault, report, "2026-07-02", only_paths={"Inbox/2606.13392v2.md"})
+
+            self.assertTrue((vault / "Resources" / "Loop Engineering" / "MiniMax Sparse Attention.md").exists())
+            self.assertTrue((vault / "Resources" / "Loop Engineering" / "source" / "MiniMax Sparse Attention.pdf").exists())
+            self.assertFalse((vault / "Inbox" / "2606.13392v2.md").exists())
+            self.assertFalse((vault / "Inbox" / "2606.13392v2.pdf").exists())
+
+    def test_convertible_target_and_source_use_converted_markdown_title(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            self.setup_ready_vault(vault)
+            (vault / "Inbox" / "Loop Notes.md").unlink()
+            converter = vault / ".claude" / "bin" / "safe-markitdown"
+            converter.parent.mkdir(parents=True)
+            converter.write_text(
+                """#!/bin/sh
+out="${1%.*}.md"
+cat > "$out" <<'EOF'
+MiniMax Sparse Attention
+
+Loop Engineering notes about maker checker workflows, verifier evidence, and autonomous coding loops.
+Stop condition design keeps the loop grounded before evidence becomes weak.
+Verifier evidence should be attached to every handoff so meditate can trust the source.
+EOF
+exit 0
+""",
+                encoding="utf-8",
+            )
+            converter.chmod(0o755)
+            (vault / "Inbox" / "2606.13392v2.pdf").write_bytes(b"%PDF-1.4 fake paper bytes\n")
+
+            report = ingest.make_report(vault, convert=True, only_paths={"Inbox/2606.13392v2.pdf"})
+            candidate = next(item for item in report["candidates"] if item["path"] == "Inbox/2606.13392v2.pdf")
+            plan = report["organization_plan"]["Inbox/2606.13392v2.pdf"]
+            encoding = report["encoding_plan"]["Inbox/2606.13392v2.pdf"]
+
+            self.assertEqual("MiniMax Sparse Attention", candidate["title"])
+            self.assertEqual("Resources/Loop Engineering/MiniMax Sparse Attention.md", plan["target"])
+            self.assertEqual(
+                [{"from": "Inbox/2606.13392v2.pdf", "to": "Resources/Loop Engineering/source/MiniMax Sparse Attention.pdf"}],
+                plan["source_moves"],
+            )
+            self.assertEqual("source/MiniMax Sparse Attention.pdf", encoding["source_file"]["expected"])
+
     def test_apply_ready_does_not_duplicate_existing_owner_backlink_by_wikilink(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp).resolve()

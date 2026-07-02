@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,7 +41,7 @@ TEST_REPORT_DIR_ENV = "INGEST_TEST_REPORT_DIR"
 
 def fixed_report_dir() -> Path:
     # Test-only escape hatch so subprocess CLI tests do not race on production /tmp reports.
-    return Path(os.environ.get(TEST_REPORT_DIR_ENV, "/tmp")).resolve()
+    return Path(os.environ.get(TEST_REPORT_DIR_ENV, tempfile.gettempdir())).resolve()
 
 
 FIXED_REPORT_DIR = fixed_report_dir()
@@ -253,6 +254,70 @@ def heading_title(text: str) -> str | None:
         if line.startswith("# "):
             return line[2:].strip()
     return None
+
+
+MARKDOWN_TITLE_PREFIXES = ("#", ">", "-", "*", "+", "|", "```", "![", "[", "<")
+INVALID_FILENAME_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def plain_text_title(text: str) -> str | None:
+    lines = [line.strip() for line in text.splitlines()]
+    start: int | None = None
+    for idx, line in enumerate(lines):
+        if not line:
+            continue
+        if line.startswith(MARKDOWN_TITLE_PREFIXES) or line.lower().startswith(("http://", "https://")):
+            return None
+        start = idx
+        break
+    if start is None:
+        return None
+
+    title_lines: list[str] = []
+    for line in lines[start : start + 3]:
+        if not line or line.startswith(MARKDOWN_TITLE_PREFIXES):
+            break
+        if len(line) > 120:
+            break
+        title_lines.append(line)
+        candidate = " ".join(title_lines)
+        if len(candidate) > 180:
+            title_lines.pop()
+            break
+        if line.endswith((".", "。", "!", "！", "?", "？")):
+            break
+    title = re.sub(r"\s+", " ", " ".join(title_lines)).strip()
+    if not title or len(title) > 180:
+        return None
+    if len(title.split()) > 18 and title.endswith((".", "。", "!", "！", "?", "？")):
+        return None
+    return title
+
+
+def markdown_title(body: str) -> str | None:
+    return heading_title(body) or plain_text_title(body)
+
+
+def filename_from_title(title: str | None) -> str | None:
+    if not title:
+        return None
+    stem = INVALID_FILENAME_CHARS_RE.sub(" ", title)
+    stem = re.sub(r"\s+", " ", stem).strip(" .")
+    if not stem:
+        return None
+    return f"{stem}.md"
+
+
+def organized_markdown_name(candidate: Candidate) -> str:
+    current = Path(candidate.markdown_path or candidate.path).name
+    if candidate.kind == "markdown":
+        return current
+    title_name = filename_from_title(candidate.title)
+    if not title_name:
+        return current
+    if normalize_name(title_name) == normalize_name(current):
+        return current
+    return title_name
 
 
 def normalize_url(url: str) -> str:
@@ -516,7 +581,7 @@ def read_markdown_info(vault: Path, markdown_rel: str) -> tuple[str | None, list
     except UnicodeDecodeError:
         return None, [], None, {}
     frontmatter, body = parse_frontmatter(text)
-    title = frontmatter_string(frontmatter, "title") or heading_title(body) or path.stem
+    title = frontmatter_string(frontmatter, "title") or markdown_title(body) or path.stem
     return title, extract_urls(frontmatter, text), fingerprint(text), frontmatter
 
 
@@ -544,7 +609,11 @@ def can_pair_existing_conversion_markdown(vault: Path, markdown_rel: str, source
         if value and any(marker in value for marker in source_markers):
             return True
     explicit_text_markers = {source_rel, f"`{source_rel}`", f"`{source_name}`", f"[[{source_name}]]"}
-    return any(marker in text for marker in explicit_text_markers)
+    if any(marker in text for marker in explicit_text_markers):
+        return True
+    if frontmatter:
+        return False
+    return Path(markdown_rel).stem == Path(source_rel).stem and bool(markdown_title(_body))
 
 
 def existing_notes(vault: Path) -> tuple[list[dict], list[dict]]:
@@ -661,7 +730,7 @@ def candidate_text(vault: Path, candidate: Candidate) -> tuple[str, Counter[str]
     except UnicodeDecodeError:
         return candidate.title or "", Counter()
     frontmatter, body = parse_frontmatter(text)
-    title = frontmatter_string(frontmatter, "title") or heading_title(body) or path.stem
+    title = frontmatter_string(frontmatter, "title") or markdown_title(body) or path.stem
     source_text = source_body_for_hash(text)
     combined = f"{path.stem}\n{title}\n{source_text}"
     return combined, concept_counts_for_text(combined)
@@ -771,7 +840,7 @@ def encoding_plan(vault: Path, candidates: list[Candidate]) -> dict:
 
         source_file = {"required": False}
         if converted:
-            expected = f"source/{Path(candidate.markdown_path).stem}{Path(candidate.path).suffix}"
+            expected = f"source/{Path(organized_markdown_name(candidate)).stem}{Path(candidate.path).suffix}"
             source_file = {
                 "required": True,
                 "expected": expected,
@@ -1348,7 +1417,7 @@ def understanding_hints(vault: Path, candidates: list[Candidate], index: dict, i
             else:
                 for score, topic, evidence, _profile in scored_topics[:3]:
                     target_candidates.append({
-                        "target": (Path("Resources") / topic / Path(candidate.markdown_path).name).as_posix(),
+                        "target": (Path("Resources") / topic / organized_markdown_name(candidate)).as_posix(),
                         "scope": "Resources",
                         "topic": topic,
                         "score": score,
@@ -1362,7 +1431,7 @@ def understanding_hints(vault: Path, candidates: list[Candidate], index: dict, i
             if score <= 0:
                 continue
             target_candidates.append({
-                "target": (Path("Projects") / owner["stem"] / Path(candidate.markdown_path).name).as_posix(),
+                "target": (Path("Projects") / owner["stem"] / organized_markdown_name(candidate)).as_posix(),
                 "scope": "Projects",
                 "project": owner["stem"],
                 "owner_path": owner["path"],
