@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import importlib.util
+import contextlib
+import io
+import os
 import subprocess
 import sys
 import tempfile
@@ -245,7 +248,7 @@ It works because markdown files can be searched, linked, and versioned.
                 f"""---
 title: Durable Memory
 type: reference
-content_fingerprint: "{fingerprint}"
+source_fingerprint: "{fingerprint}"
 ---
 
 # Durable Memory
@@ -256,6 +259,8 @@ content_fingerprint: "{fingerprint}"
 - See also [[AI Native 转型]].
 
 ## 原文 / 摘录
+
+- 以下保留原始正文或转换文本，不删除原文证据。
 
 The durable memory layer keeps reusable decisions outside one-off chats.
 It works because markdown files can be searched, linked, and versioned.
@@ -351,6 +356,64 @@ type: index
             report = optimize_vault.build_report(vault, ["Resources"])
 
         self.assertEqual([], report["metadata_missing"])
+
+    def test_finalize_log_mode_updates_latest_commit_placeholder_only(self) -> None:
+        commit = "e175738f3dda05d3a0cba6a557abb569d1a2b4a4"
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            log = vault / ".claude" / "meditate.log"
+            log.parent.mkdir(parents=True)
+            log.write_text(
+                """## 2026-07-01 manual
+- 范围：Resources
+commit: 1111111111111111111111111111111111111111
+
+## 2026-07-02 manual
+- 范围：Projects, Areas, Resources, Archive
+commit: 无
+""",
+                encoding="utf-8",
+            )
+            old_cwd = Path.cwd()
+            os.chdir(vault)
+            try:
+                rc = optimize_vault.main(["--mode", "finalize-log", "--commit", commit])
+            finally:
+                os.chdir(old_cwd)
+
+            text = log.read_text(encoding="utf-8")
+
+        self.assertEqual(0, rc)
+        self.assertIn("commit: 1111111111111111111111111111111111111111", text)
+        self.assertIn(f"commit: {commit}", text)
+        self.assertNotIn("commit: 无", text)
+
+    def test_apply_safe_progress_writes_stage_messages_to_stderr(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            (vault / "Resources" / "PKM").mkdir(parents=True)
+            write_reference(vault / "Resources" / "PKM" / "Article.md", "Article")
+            old_cwd = Path.cwd()
+            stderr = io.StringIO()
+            stdout = io.StringIO()
+            os.chdir(vault)
+            try:
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    rc = optimize_vault.main([
+                        "--mode",
+                        "apply-safe",
+                        "--date",
+                        "2026-07-02",
+                        "--no-log",
+                        "--progress",
+                    ])
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(0, rc)
+        progress = stderr.getvalue()
+        self.assertIn("meditate: build report", progress)
+        self.assertIn("meditate: safe self-check", progress)
 
 
 if __name__ == "__main__":

@@ -1961,6 +1961,62 @@ def organization_plan(report: dict) -> dict:
     return plans
 
 
+def resource_scope_for_target(target: str | None) -> str | None:
+    if not target:
+        return None
+    parts = Path(target).parts
+    if len(parts) >= 2 and parts[0] == "Resources":
+        return (Path("Resources") / parts[1]).as_posix()
+    return None
+
+
+def meditate_scope_suggestions(report: dict) -> dict:
+    readiness = report.get("placement_readiness") or {}
+    hints = report.get("understanding_hints") or {}
+    scopes: list[str] = []
+    reasons: list[dict] = []
+    for candidate_path, ready in sorted(readiness.items()):
+        if ready.get("status") != "ready":
+            continue
+        primary_scope = resource_scope_for_target(ready.get("target"))
+        if not primary_scope:
+            continue
+        related_scopes: list[str] = []
+        for target_candidate in (hints.get(candidate_path) or {}).get("target_candidates") or []:
+            scope = resource_scope_for_target(target_candidate.get("target"))
+            if not scope or scope == primary_scope or scope in related_scopes:
+                continue
+            related_scopes.append(scope)
+            if len(related_scopes) >= 2:
+                break
+        for scope in [primary_scope, *related_scopes]:
+            if scope not in scopes:
+                scopes.append(scope)
+        reasons.append({
+            "candidate": candidate_path,
+            "primary_scope": primary_scope,
+            "related_scopes": related_scopes,
+        })
+    command = ""
+    if scopes:
+        scope_args = " ".join(f'--scope "{scope}"' for scope in scopes)
+        command = (
+            "python3 .claude/skills/meditate/scripts/optimize_vault.py "
+            "--mode apply-safe --json /tmp/meditate.json --markdown /tmp/meditate.md "
+            "--date <YYYY-MM-DD> --progress "
+            f"{scope_args}"
+        )
+    return {
+        "scopes": scopes,
+        "command": command,
+        "reasons": reasons,
+        "notes": [
+            "run after reviewed ingest apply-ready when new Resource material may change nearby topic structure",
+            "includes ready Resource target topics plus up to two adjacent Resource candidate topics",
+        ],
+    }
+
+
 def excerpt_candidates(source_text: str) -> list[str]:
     normalized = re.sub(r"\s+", " ", source_text).strip()
     if not normalized:
@@ -2589,6 +2645,7 @@ def make_report(vault: Path, convert: bool, only_paths: set[str] | None = None) 
     report["placement_readiness"] = placement_readiness(report, vault)
     report["meditate_handoff"] = meditate_handoff(report)
     report["organization_plan"] = organization_plan(report)
+    report["meditate_scope_suggestions"] = meditate_scope_suggestions(report)
     report["distillation_seed"] = distillation_seed(vault, candidates, report)
     report["ownership_update_plan"] = ownership_update_plan(report)
     report["frontmatter_patch_plan"] = frontmatter_patch_plan(report)
@@ -3240,6 +3297,26 @@ def append_intake_rules(lines: list[str], report: dict) -> None:
             lines.append(f"- {rule}")
 
 
+def summarize_applied_learning_rules(applied: list[dict]) -> list[dict]:
+    grouped: dict[tuple[object, ...], dict] = {}
+    for item in applied:
+        key = (
+            item.get("candidate"),
+            item.get("action"),
+            item.get("source"),
+            item.get("effect"),
+            item.get("target"),
+        )
+        if key not in grouped:
+            grouped[key] = {**item, "count": 0, "evidence_samples": []}
+        grouped_item = grouped[key]
+        grouped_item["count"] += 1
+        evidence = item.get("rule_evidence")
+        if evidence and evidence not in grouped_item["evidence_samples"]:
+            grouped_item["evidence_samples"].append(evidence)
+    return list(grouped.values())
+
+
 def append_intake_learning_audit(lines: list[str], report: dict) -> None:
     lines.extend(["", "## 摄入学习审计"])
     audit = report.get("intake_learning_audit") or {}
@@ -3253,10 +3330,14 @@ def append_intake_learning_audit(lines: list[str], report: dict) -> None:
     applied = audit.get("applied") or []
     if applied:
         lines.append("- 本次命中：")
-        for item in applied:
+        for item in summarize_applied_learning_rules(applied):
+            count = item.get("count", 1)
+            samples = item.get("evidence_samples") or []
+            evidence = samples[0] if samples else item.get("rule_evidence")
+            evidence_text = f"{count} 条规则；例：{evidence}" if count > 1 else str(evidence or "")
             lines.append(
                 f"  - `{item.get('candidate')}`：{item.get('action')} / {item.get('source')} "
-                f"→ {item.get('effect')} `{item.get('target')}`（{item.get('rule_evidence')}）"
+                f"→ {item.get('effect')} `{item.get('target')}`（{evidence_text}）"
             )
     else:
         lines.append("- 本次命中：无")
@@ -3515,6 +3596,25 @@ def append_organization_plan(lines: list[str], report: dict) -> None:
             lines.append(f"  - 备注：{note}")
 
 
+def append_meditate_scope_suggestions(lines: list[str], report: dict) -> None:
+    lines.extend(["", "## 后续 meditate scope 建议"])
+    suggestion = report.get("meditate_scope_suggestions") or {}
+    scopes = suggestion.get("scopes") or []
+    if not scopes:
+        lines.append("- 无")
+        return
+    lines.append("- 建议范围：" + ", ".join(f"`{scope}`" for scope in scopes))
+    if suggestion.get("command"):
+        lines.append(f"- 建议命令：`{suggestion['command']}`")
+    for item in suggestion.get("reasons") or []:
+        related = ", ".join(f"`{scope}`" for scope in item.get("related_scopes") or []) or "无"
+        lines.append(
+            f"- `{item.get('candidate')}`：主范围 `{item.get('primary_scope')}`；相邻范围：{related}"
+        )
+    for note in suggestion.get("notes") or []:
+        lines.append(f"- 备注：{note}")
+
+
 def append_distillation_seed(lines: list[str], report: dict) -> None:
     lines.extend(["", "## 提炼种子"])
     seeds = report.get("distillation_seed") or {}
@@ -3605,14 +3705,15 @@ def markdown_report(report: dict) -> str:
     append_ownership_update_plan(lines, report)
     append_meditate_handoff(lines, report)
     append_organization_plan(lines, report)
+    append_meditate_scope_suggestions(lines, report)
     append_distillation_seed(lines, report)
     append_meditate_feedback(lines, report)
     append_apply_selection_audit(lines, report)
     lines.extend([
         "",
         "## 需要模型继续处理",
-        "- PARA 分类、提炼、承接、语义补链：由模型基于 ready 候选、摄入学习规则、摄入学习审计、摄入质量指标、摄入质量趋势、归位就绪度、首次编码计划、元数据写入计划、双链验证计划、正文写入计划、摄入理解提示、承接更新计划、meditate 交接清单、首次归位执行计划、提炼种子和 meditate 反馈提醒继续核验并执行。",
-        "- 摄入学习规则、摄入学习审计、摄入质量指标、摄入质量趋势、归位就绪度、首次编码计划、元数据写入计划、双链验证计划、正文写入计划、摄入理解提示、承接更新计划、meditate 交接清单、首次归位执行计划、提炼种子和 meditate 反馈提醒是 report-only，不授权脚本重组或改写已入库的存量知识。",
+        "- PARA 分类、提炼、承接、语义补链：由模型基于 ready 候选、摄入学习规则、摄入学习审计、摄入质量指标、摄入质量趋势、归位就绪度、首次编码计划、元数据写入计划、双链验证计划、正文写入计划、摄入理解提示、承接更新计划、meditate 交接清单、首次归位执行计划、后续 meditate scope 建议、提炼种子和 meditate 反馈提醒继续核验并执行。",
+        "- 摄入学习规则、摄入学习审计、摄入质量指标、摄入质量趋势、归位就绪度、首次编码计划、元数据写入计划、双链验证计划、正文写入计划、摄入理解提示、承接更新计划、meditate 交接清单、首次归位执行计划、后续 meditate scope 建议、提炼种子和 meditate 反馈提醒是 report-only，不授权脚本重组或改写已入库的存量知识。",
         "- 主题相似但非完全重复：由模型判断并只做低风险补链或报告。",
         "",
         "## 留在 Inbox / 跳过",

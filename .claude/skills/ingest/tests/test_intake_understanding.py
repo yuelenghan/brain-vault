@@ -353,38 +353,38 @@ class IntakeUnderstandingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp).resolve()
             write_note(
-                vault / "Projects" / "sample-project.md",
-                "sample-project",
+                vault / "Projects" / "devops-playbook.md",
+                "devops-playbook",
                 "project",
-                "Active project for workflow automation, remediation workflows, and agent playbooks.",
+                "Active project for Jira automation, remediation workflows, and internal DevOps agent playbooks.",
             )
             write_note(
-                vault / "Inbox" / "Sample Project Sprint Notes.md",
-                "Sample Project Sprint Notes",
+                vault / "Inbox" / "DevOps Playbook Sprint Notes.md",
+                "DevOps Playbook Sprint Notes",
                 "reference",
-                "sample-project sprint notes for workflow automation and remediation workflow delivery.",
+                "devops-playbook sprint notes for Jira automation and remediation workflow delivery.",
             )
 
             report = ingest.make_report(vault, convert=False)
             markdown = ingest.markdown_report(report)
 
-        hint = report["understanding_hints"]["Inbox/Sample Project Sprint Notes.md"]
-        self.assertEqual("Projects/sample-project/Sample Project Sprint Notes.md", hint["target_candidates"][0]["target"])
+        hint = report["understanding_hints"]["Inbox/DevOps Playbook Sprint Notes.md"]
+        self.assertEqual("Projects/devops-playbook/DevOps Playbook Sprint Notes.md", hint["target_candidates"][0]["target"])
         self.assertEqual("Projects", hint["target_candidates"][0]["scope"])
-        self.assertEqual("Projects/sample-project.md", hint["ownership_candidates"][0]["path"])
+        self.assertEqual("Projects/devops-playbook.md", hint["ownership_candidates"][0]["path"])
         self.assertEqual([], hint["ownership_actions"])
-        readiness = report["placement_readiness"]["Inbox/Sample Project Sprint Notes.md"]
+        readiness = report["placement_readiness"]["Inbox/DevOps Playbook Sprint Notes.md"]
         self.assertEqual("ready", readiness["status"])
-        self.assertEqual(["Projects/sample-project.md"], readiness["ownership"])
-        org_plan = report["organization_plan"]["Inbox/Sample Project Sprint Notes.md"]
+        self.assertEqual(["Projects/devops-playbook.md"], readiness["ownership"])
+        org_plan = report["organization_plan"]["Inbox/DevOps Playbook Sprint Notes.md"]
         self.assertEqual("ready", org_plan["status"])
         self.assertFalse(org_plan["resource_index"]["required"])
-        seed = report["distillation_seed"]["Inbox/Sample Project Sprint Notes.md"]
-        self.assertEqual("Projects/sample-project", seed["use_context"]["target_dir"])
-        content_plan = report["content_patch_plan"]["Inbox/Sample Project Sprint Notes.md"]
-        self.assertIn("`Projects/sample-project`", content_plan["body_markdown"])
+        seed = report["distillation_seed"]["Inbox/DevOps Playbook Sprint Notes.md"]
+        self.assertEqual("Projects/devops-playbook", seed["use_context"]["target_dir"])
+        content_plan = report["content_patch_plan"]["Inbox/DevOps Playbook Sprint Notes.md"]
+        self.assertIn("`Projects/devops-playbook`", content_plan["body_markdown"])
         self.assertNotIn("待定主题", content_plan["body_markdown"])
-        self.assertIn("Projects/sample-project/Sample Project Sprint Notes.md", markdown)
+        self.assertIn("Projects/devops-playbook/DevOps Playbook Sprint Notes.md", markdown)
 
     def test_placement_readiness_is_ready_when_target_and_owner_are_known(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -667,6 +667,86 @@ commit: 无
         self.assertIn("结构反馈优先归入", markdown)
         self.assertIn("## 摄入学习审计", markdown)
         self.assertIn("target candidate boosted", markdown)
+
+    def test_intake_learning_audit_markdown_summarizes_repeated_rule_hits(self) -> None:
+        lines: list[str] = []
+        ingest.append_intake_learning_audit(
+            lines,
+            {
+                "intake_learning_audit": {
+                    "rules_total": 3,
+                    "by_action": {"prefer_ownership": 3},
+                    "applied": [
+                        {
+                            "candidate": "Inbox/Loop Notes.md",
+                            "action": "prefer_ownership",
+                            "source": "ingest_history",
+                            "effect": "ownership candidate preferred",
+                            "target": "Areas/AI Native 转型.md",
+                            "rule_evidence": "rule one",
+                        },
+                        {
+                            "candidate": "Inbox/Loop Notes.md",
+                            "action": "prefer_ownership",
+                            "source": "ingest_history",
+                            "effect": "ownership candidate preferred",
+                            "target": "Areas/AI Native 转型.md",
+                            "rule_evidence": "rule two",
+                        },
+                        {
+                            "candidate": "Inbox/Loop Notes.md",
+                            "action": "prefer_ownership",
+                            "source": "ingest_history",
+                            "effect": "ownership candidate preferred",
+                            "target": "Areas/AI Native 转型.md",
+                            "rule_evidence": "rule three",
+                        },
+                    ],
+                    "unapplied_rules": [],
+                    "notes": [],
+                }
+            },
+        )
+        markdown = "\n".join(lines)
+
+        self.assertIn("3 条规则", markdown)
+        self.assertIn("rule one", markdown)
+        self.assertNotIn("rule two", markdown)
+        self.assertNotIn("rule three", markdown)
+
+    def test_meditate_scope_suggestions_include_ready_resource_targets_and_adjacent_topics(self) -> None:
+        report = {
+            "placement_readiness": {
+                "Inbox/Routing Pattern.md": {
+                    "status": "ready",
+                    "target": "Resources/LLM Inference/Routing Pattern.md",
+                }
+            },
+            "understanding_hints": {
+                "Inbox/Routing Pattern.md": {
+                    "target_candidates": [
+                        {"target": "Resources/LLM Inference/Routing Pattern.md"},
+                        {"target": "Resources/AI Agents/Routing Pattern.md"},
+                        {"target": "Projects/Loop Engineering 落地实验/Routing Pattern.md"},
+                    ]
+                }
+            },
+        }
+
+        suggestion = ingest.meditate_scope_suggestions(report)
+
+        self.assertEqual(["Resources/LLM Inference", "Resources/AI Agents"], suggestion["scopes"])
+        self.assertIn('--progress --scope "Resources/LLM Inference" --scope "Resources/AI Agents"', suggestion["command"])
+        self.assertEqual(
+            [
+                {
+                    "candidate": "Inbox/Routing Pattern.md",
+                    "primary_scope": "Resources/LLM Inference",
+                    "related_scopes": ["Resources/AI Agents"],
+                }
+            ],
+            suggestion["reasons"],
+        )
 
     def test_meditate_structure_feedback_ignores_missing_suggested_topic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

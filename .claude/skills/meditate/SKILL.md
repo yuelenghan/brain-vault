@@ -42,7 +42,17 @@ python3 .claude/skills/meditate/scripts/optimize_vault.py \
   --mode apply-safe \
   --json /tmp/meditate.json \
   --markdown /tmp/meditate.md \
-  --date <YYYY-MM-DD>
+  --date <YYYY-MM-DD> \
+  --progress
+```
+
+- `--progress` writes stage heartbeats to stderr during `apply-safe`, so long deterministic passes are visibly alive without changing the fixed JSON / Markdown report contract.
+- After committing staged meditate changes, finalize the ignored local log with the exact hash from `git log -1 --format=%H` instead of editing `.claude/meditate.log` by hand:
+
+```bash
+python3 .claude/skills/meditate/scripts/optimize_vault.py \
+  --mode finalize-log \
+  --commit <40-character commit hash>
 ```
 
 - When the user says "only analyze / only report", use `--mode scan` only.
@@ -205,7 +215,7 @@ When unsatisfied, do not commit; undo safely with a reverse `git mv` or Edit if 
 ### 9. Log and commit
 
 - When there are committable optimization results, commit only the staged files from this run: `git commit -m "meditate: <summary>"`.
-- After a normal commit run `git log -1 --format=%H`; the `commit:` in the log may only use the hash just output.
+- After a normal commit run `git log -1 --format=%H`, then run `python3 .claude/skills/meditate/scripts/optimize_vault.py --mode finalize-log --commit <hash>`; the `commit:` in the log may only use the hash just output.
 - Before writing the log, Read `.claude/meditate.log`; create it if it does not exist. Never overwrite and lose history.
 - When only analyzing with no changes, do not commit; the log still records a report summary, `commit: 无`.
 

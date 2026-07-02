@@ -27,6 +27,7 @@ MIN_RESOURCE_TOPIC_SPLIT_MATERIALS = 5
 MIN_RESOURCE_TOPIC_SPLIT_CLUSTER_MATERIALS = 3
 WIKILINK_RE = re.compile(r"!?(?<!\!)\[\[([^\]]+)\]\]")
 URL_RE = re.compile(r"https?://[^\s)\]}>\"']+")
+COMMIT_HASH_RE = re.compile(r"^[0-9a-f]{40}$")
 RESOURCE_INDEX_BEGIN = "<!-- BEGIN: resource-index -->"
 RESOURCE_INDEX_END = "<!-- END: resource-index -->"
 OWNERSHIP_INDEX_BEGIN = "<!-- BEGIN: ownership-index -->"
@@ -133,6 +134,11 @@ class OwnershipProfile:
 def fail(message: str) -> int:
     print(f"meditate: {message}", file=sys.stderr)
     return 2
+
+
+def progress(enabled: bool, message: str) -> None:
+    if enabled:
+        print(f"meditate: {message}", file=sys.stderr, flush=True)
 
 
 def run_git(vault: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -406,6 +412,11 @@ def normalize_body_for_hash(text: str) -> str:
     for line in body.splitlines():
         stripped = line.strip()
         if stripped.startswith("> 整理自 Inbox"):
+            continue
+        if stripped in {
+            "- 以下保留原始正文或转换文本，不删除原文证据。",
+            "- 将当前正文整体保留到本节，必要时只做标题分隔，不删除原文证据。",
+        }:
             continue
         if "内容指纹" in stripped or stripped.startswith("content_fingerprint:") or stripped.startswith("source_fingerprint:"):
             continue
@@ -3784,6 +3795,22 @@ def append_log(vault: Path, report: dict, date: str) -> None:
     log_path.write_text(old + ("\n" if old and not old.endswith("\n") else "") + entry, encoding="utf-8")
 
 
+def finalize_latest_log_commit(vault: Path, commit_hash: str) -> None:
+    if not COMMIT_HASH_RE.fullmatch(commit_hash):
+        raise ValueError("commit hash must be a 40-character lowercase hex SHA")
+    log_path = vault / ".claude" / "meditate.log"
+    if not log_path.exists():
+        raise ValueError(".claude/meditate.log does not exist")
+    lines = log_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    for index in range(len(lines) - 1, -1, -1):
+        if lines[index].strip() == "commit: 无":
+            newline = "\n" if lines[index].endswith("\n") else ""
+            lines[index] = f"commit: {commit_hash}{newline}"
+            log_path.write_text("".join(lines), encoding="utf-8")
+            return
+    raise ValueError("latest meditate log has no commit: 无 placeholder")
+
+
 def append_skipped_once(report: dict, item: dict) -> None:
     if item not in report["skipped_uncertain"]:
         report["skipped_uncertain"].append(item)
@@ -4357,11 +4384,13 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Scan or safely optimize a brain vault.")
     parser.add_argument("--vault", default=".", help="Vault root, defaults to current directory")
     parser.add_argument("--scope", action="append", help="Scope directory relative to vault; repeatable")
-    parser.add_argument("--mode", choices=("scan", "apply-safe"), default="scan")
+    parser.add_argument("--mode", choices=("scan", "apply-safe", "finalize-log"), default="scan")
     parser.add_argument("--json", dest="json_path", help="Write JSON report to this path")
     parser.add_argument("--markdown", dest="markdown_path", help="Write Markdown report to this path")
     parser.add_argument("--date", default="", help="Date string for markers/logs, e.g. 2026-06-29")
     parser.add_argument("--no-log", action="store_true", help="Do not append .claude/meditate.log in apply-safe mode")
+    parser.add_argument("--commit", dest="commit_hash", help="Finalize the latest meditate log entry with this commit hash")
+    parser.add_argument("--progress", action="store_true", help="Write apply-safe stage progress to stderr")
     args = parser.parse_args(argv)
 
     vault = Path(args.vault).resolve()
@@ -4370,6 +4399,14 @@ def main(argv: list[str]) -> int:
         return fail("--vault override is not allowed; run from the vault root")
     if not vault.exists() or not vault.is_dir():
         return fail("vault does not exist or is not a directory")
+    if args.mode == "finalize-log":
+        if not args.commit_hash:
+            return fail("--commit is required with --mode finalize-log")
+        try:
+            finalize_latest_log_commit(vault, args.commit_hash)
+        except ValueError as exc:
+            return fail(str(exc))
+        return 0
     try:
         json_path = checked_report_path(args.json_path, FIXED_JSON_REPORT, "JSON") if args.json_path else None
         markdown_path = checked_report_path(args.markdown_path, FIXED_MARKDOWN_REPORT, "Markdown") if args.markdown_path else None
@@ -4381,51 +4418,70 @@ def main(argv: list[str]) -> int:
         if not is_relative_inside(scope_path, vault):
             return fail(f"scope escapes vault: {scope}")
 
+    progress(args.progress, "build report")
     report = build_report(vault, scopes)
     if args.mode == "apply-safe":
         protected = set(report["protected_paths"])
         notes, _by_name, _file_stems, _attachment_targets = build_index(vault, scopes, protected)
         date = args.date or "未注明日期"
+        progress(args.progress, "apply source file policy")
         apply_source_file_policy(vault, report)
         notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report)
         for _ in range(5):
+            progress(args.progress, "apply structural reorganization")
             before = len(report["applied"].get("structural_moves", []))
             apply_structural_reorganization(vault, report)
             notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report)
             after = len(report["applied"].get("structural_moves", []))
             if after == before:
                 break
+        progress(args.progress, "apply topic indexes")
         apply_topic_indexes(vault, report)
         notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report)
+        progress(args.progress, "apply understanding profiles")
         apply_understanding_profiles(vault, report)
         notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report)
+        progress(args.progress, "apply ownership area creations")
         apply_ownership_area_creations(vault, report, date)
         notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report)
+        progress(args.progress, "apply ownership area profiles")
         apply_ownership_area_profile_updates(vault, report)
         notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report)
+        progress(args.progress, "apply ownership structure")
         apply_ownership_structure(vault, report, date)
         notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report)
+        progress(args.progress, "apply ownership splits")
         apply_ownership_splits(vault, report, date)
         notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report)
+        progress(args.progress, "apply duplicates")
         apply_duplicates(vault, notes, report, date)
         notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report)
+        progress(args.progress, "apply broken links")
         apply_broken_links(vault, notes, report)
+        progress(args.progress, "apply empty stubs")
         apply_empty_stubs(vault, report)
         notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report, include_structure=False)
+        progress(args.progress, "apply understanding links")
         apply_understanding_links(vault, report)
         notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report, include_structure=False)
+        progress(args.progress, "apply metadata")
         apply_metadata(notes, report)
         notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report, include_structure=False)
+        progress(args.progress, "apply topic relations")
         apply_topic_relations(vault, report)
+        progress(args.progress, "apply ownership relations")
         apply_ownership_relations(vault, report)
         if not args.no_log:
+            progress(args.progress, "append log")
             append_log(vault, report, date)
+        progress(args.progress, "safe self-check")
         safe_self_check(vault, report)
     else:
         report["verification"]["git_status"] = "scan 模式未修改"
         report["verification"]["self_check"] = "通过"
 
     try:
+        progress(args.progress, "write outputs")
         write_outputs(report, json_path, markdown_path)
     except ValueError as exc:
         return fail(str(exc))
