@@ -2964,6 +2964,10 @@ def normalize_source_note_text(text: str, canonical_ref: str) -> str:
 def upsert_section_bullet(text: str, heading: str, bullet: str) -> str:
     if bullet in text:
         return text
+    bullet_links = WIKILINK_RE.findall(bullet)
+    bullet_target_stem = (
+        Path(wikilink_target(bullet_links[0])).stem if bullet_links else None
+    )
     heading_line = f"## {heading}"
     normalized = text.rstrip("\n")
     lines = normalized.split("\n") if normalized else []
@@ -2977,6 +2981,12 @@ def upsert_section_bullet(text: str, heading: str, bullet: str) -> str:
         if lines[idx].startswith("## "):
             insert_idx = idx
             break
+
+    if bullet_target_stem is not None:
+        for line in lines[heading_idx + 1 : insert_idx]:
+            for raw_link in WIKILINK_RE.findall(line):
+                if Path(wikilink_target(raw_link)).stem == bullet_target_stem:
+                    return text
 
     while insert_idx > heading_idx + 1 and not lines[insert_idx - 1].strip():
         insert_idx -= 1

@@ -168,15 +168,41 @@ type: reference
         self.assertIn("[[Obsidian Course]]", project)
         self.assertEqual(2, len(report["applied"]["understanding_links"]))
 
+    def test_apply_safe_does_not_duplicate_existing_ownership_backlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            write_note(
+                vault / "Areas" / "AI Native 转型.md",
+                "AI Native 转型",
+                "area",
+                "## 资料索引\n\n- [[Obsidian Course]]：existing custom backlink.\n",
+            )
+            write_note(
+                vault / "Resources" / "PKM" / "Obsidian Course.md",
+                "Obsidian Course",
+                "reference",
+                "This course supports AI Native 转型.",
+            )
+
+            report = optimize_vault.build_report(vault, ["Areas", "Resources"])
+            optimize_vault.apply_understanding_links(vault, report)
+
+            source = (vault / "Resources" / "PKM" / "Obsidian Course.md").read_text(encoding="utf-8")
+            area = (vault / "Areas" / "AI Native 转型.md").read_text(encoding="utf-8")
+
+        self.assertIn("[[AI Native 转型]]", source)
+        self.assertEqual(1, area.count("[[Obsidian Course]]"))
+        self.assertEqual(1, len(report["applied"]["understanding_links"]))
+
     def test_reunderstanding_ignores_negative_ownership_mentions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp).resolve()
-            write_note(vault / "Projects" / "sample-project.md", "sample-project", "project")
+            write_note(vault / "Projects" / "devops-playbook.md", "devops-playbook", "project")
             write_note(
                 vault / "Archive" / "Patents" / "Legacy Patent.md",
                 "Legacy Patent",
                 "archive",
-                "归档为历史技术资产，内容不直接关联当前 AI Native 转型、Loop Engineering 落地实验、sample-project 或 orbit。",
+                "归档为历史技术资产，内容不直接关联当前 AI Native 转型、Loop Engineering 落地实验、devops-playbook 或 orbit。",
             )
 
             report = optimize_vault.build_report(vault, ["Projects", "Archive"])
