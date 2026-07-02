@@ -988,6 +988,32 @@ def owner_for_wikilink(index: dict, wikilink: str) -> dict | None:
     return None
 
 
+def log_entry_is_committed(entry: list[str]) -> bool:
+    for line in entry:
+        stripped = line.strip()
+        if not stripped.startswith("commit:"):
+            continue
+        value = stripped.split(":", 1)[1].strip().lower()
+        return bool(value and value not in {"无", "none", "null", "no"})
+    return False
+
+
+def committed_ingest_log_entries(lines: list[str]) -> list[list[str]]:
+    entries: list[list[str]] = []
+    current: list[str] = []
+    for line in lines:
+        if line.startswith("## "):
+            if current and log_entry_is_committed(current):
+                entries.append(current)
+            current = [line]
+            continue
+        if current:
+            current.append(line)
+    if current and log_entry_is_committed(current):
+        entries.append(current)
+    return entries
+
+
 def intake_rules_from_ingest_history(vault: Path, index: dict, limit: int = 12) -> list[dict]:
     rel = ".claude/ingest.log"
     path = vault / rel
@@ -1000,7 +1026,8 @@ def intake_rules_from_ingest_history(vault: Path, index: dict, limit: int = 12) 
     rules: list[dict] = []
     seen: set[tuple[str, str]] = set()
     current_topic_paths: list[str] = []
-    for line in lines[-400:]:
+    recent_lines = [line for entry in committed_ingest_log_entries(lines) for line in entry][-400:]
+    for line in recent_lines:
         stripped = line.strip()
         if stripped.startswith("## "):
             current_topic_paths = []
@@ -1602,7 +1629,7 @@ def read_ingest_quality_history(vault: Path, limit: int = 12) -> list[dict]:
     except UnicodeDecodeError:
         return []
     history: list[dict] = []
-    for line in lines:
+    for line in [line for entry in committed_ingest_log_entries(lines) for line in entry]:
         stripped = line.strip()
         if stripped.startswith("- 摄入质量："):
             history.append({
@@ -2831,12 +2858,56 @@ def git_checked(vault: Path, args: list[str]) -> None:
         raise RuntimeError(detail)
 
 
+def wikilink_stems(text: str) -> set[str]:
+    stems: set[str] = set()
+    for raw in re.findall(r"\[\[([^\]]+)\]\]", text):
+        target = raw.split("|", 1)[0].split("#", 1)[0].strip()
+        if target:
+            stems.add(normalize_name(target))
+    return stems
+
+
 def append_snippet_once(path: Path, snippet: str) -> None:
     old = path.read_text(encoding="utf-8") if path.exists() else ""
     if snippet in old:
         return
+    snippet_links = wikilink_stems(snippet)
+    if snippet_links and snippet_links & wikilink_stems(old):
+        return
     separator = "\n" if old.endswith("\n") or not old else "\n\n"
     path.write_text(old + separator + snippet + "\n", encoding="utf-8")
+
+
+def replace_frontmatter_scalar(text: str, key: str, value: str) -> str:
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return text
+    end = None
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            end = idx
+            break
+    if end is None:
+        return text
+    rendered = f"{key}: {value}"
+    for idx in range(1, end):
+        if re.match(rf"^{re.escape(key)}\s*:", lines[idx]):
+            lines[idx] = rendered
+            return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+    lines.insert(end, rendered)
+    return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+
+
+def refresh_final_source_fingerprint(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    frontmatter, _body = parse_frontmatter(text)
+    existing = frontmatter_string(frontmatter, "source_fingerprint")
+    if not existing:
+        return
+    final = fingerprint(text)
+    if final == existing:
+        return
+    path.write_text(replace_frontmatter_scalar(text, "source_fingerprint", final), encoding="utf-8")
 
 
 def original_body_for_apply(text: str) -> str:
@@ -2996,6 +3067,7 @@ def apply_ready(vault: Path, report: dict, date: str, only_paths: set[str] | Non
         body_markdown = ((content_plans.get(path) or {}).get("body_markdown") or "").replace("<YYYY-MM-DD>", date)
         pieces = [yaml.strip(), body_markdown.strip(), original_body]
         target_path.write_text("\n\n".join(piece for piece in pieces if piece).rstrip() + "\n", encoding="utf-8")
+        refresh_final_source_fingerprint(target_path)
 
         for update in (ownership_plans.get(path) or {}).get("updates") or []:
             update_path = update.get("path")
@@ -3785,7 +3857,7 @@ def main(argv: list[str]) -> int:
                 commit_applied_ready(vault, report)
         except RuntimeError as exc:
             return fail(str(exc))
-        if not args.no_log:
+        if args.commit and not args.no_log:
             append_log(vault, report, args.date, args.mode)
     if args.mode == "apply-duplicates":
         apply_duplicates(vault, report, args.date)

@@ -527,7 +527,6 @@ Verifier evidence should be attached to every handoff so meditate can trust the 
                 "apply-ready",
                 "--date",
                 "2026-07-02",
-                "--no-log",
             )
 
             self.assertEqual(0, completed.returncode, completed.stderr)
@@ -536,6 +535,7 @@ Verifier evidence should be attached to every handoff so meditate can trust the 
             staged = run(vault, "git", "diff", "--cached", "--name-only").stdout.splitlines()
             self.assertIn("Resources/Loop Engineering/Loop Notes.md", staged)
             self.assertIn("Areas/Loop Engineering.md", staged)
+            self.assertFalse((vault / ".claude" / "ingest.log").exists())
 
     def test_cli_apply_ready_only_applies_reviewed_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -878,6 +878,9 @@ exit 0
             self.assertFalse((vault / "Inbox" / "Loop Metrics.csv").exists())
             organized = target.read_text(encoding="utf-8")
             self.assertIn('source_file: "source/Loop Metrics.csv"', organized)
+            notes, invalid = ingest.existing_notes(vault)
+            self.assertEqual([], invalid)
+            self.assertTrue(any(note["path"] == "Resources/Loop Engineering/Loop Metrics.md" for note in notes))
             self.assertIn("原始文件：[[source/Loop Metrics.csv]]", organized)
             self.assertIn("## 提炼", organized)
             self.assertIn("Converted Loop Engineering export", organized)
@@ -888,6 +891,23 @@ exit 0
             self.assertIn("Areas/Loop Engineering.md", staged)
             self.assertNotIn("Inbox/Loop Metrics.md", staged)
             self.assertNotIn("Inbox/Loop Metrics.csv", staged)
+
+    def test_apply_ready_does_not_duplicate_existing_owner_backlink_by_wikilink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            self.setup_ready_vault(vault)
+            owner = vault / "Areas" / "Loop Engineering.md"
+            owner.write_text(
+                owner.read_text(encoding="utf-8")
+                + "\n## 资料索引\n\n- [[Loop Notes]]：existing custom backlink.\n",
+                encoding="utf-8",
+            )
+
+            report = ingest.make_report(vault, convert=False)
+            ingest.apply_ready(vault, report, "2026-07-02")
+
+            owner_text = owner.read_text(encoding="utf-8")
+            self.assertEqual(1, owner_text.count("[[Loop Notes]]"))
 
     def test_apply_ready_leaves_existing_same_name_markdown_without_source_evidence_in_inbox(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

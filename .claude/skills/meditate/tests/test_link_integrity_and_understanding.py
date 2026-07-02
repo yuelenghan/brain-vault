@@ -168,6 +168,24 @@ type: reference
         self.assertIn("[[Obsidian Course]]", project)
         self.assertEqual(2, len(report["applied"]["understanding_links"]))
 
+    def test_reunderstanding_ignores_footer_only_ownership_mentions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            write_note(vault / "Areas" / "AI Agents.md", "AI Agents", "area", "Agent ownership.")
+            write_note(
+                vault / "Resources" / "Data Semantic Layer" / "RAG Units.md",
+                "RAG Units",
+                "reference",
+                """RAG retrieval units need version state, source fields, and access-control metadata.
+
+Find me on social media for more insights and tutorials on LLMs, AI Agents, and Machine Learning.
+""",
+            )
+
+            report = optimize_vault.build_report(vault, ["Areas", "Resources"])
+
+        self.assertEqual([], report["understanding"]["link_candidates"])
+
     def test_apply_safe_does_not_duplicate_existing_ownership_backlink(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp).resolve()

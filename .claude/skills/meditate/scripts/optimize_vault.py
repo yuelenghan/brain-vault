@@ -977,6 +977,26 @@ def text_mentions_name(text: str, name: str) -> bool:
     return knowledge_model.text_mentions_name(text, name)
 
 
+LOW_SIGNAL_MENTION_RE = re.compile(
+    r"\b(find me|follow|subscribe|reshare|share with|for more insights|tutorials?|newsletter|social media|network)\b",
+    re.IGNORECASE,
+)
+
+
+def text_mentions_name_in_signal_context(text: str, name: str) -> bool:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return False
+    footer_start = max(0, len(lines) - 8)
+    for index, line in enumerate(lines):
+        if not text_mentions_name(line, name):
+            continue
+        if index >= footer_start and LOW_SIGNAL_MENTION_RE.search(line):
+            continue
+        return True
+    return False
+
+
 def source_text_without_wikilinks(note: Note) -> str:
     text = note.abs_path.read_text(encoding="utf-8")
     return WIKILINK_RE.sub(" ", source_body_for_hash(text))
@@ -2190,7 +2210,10 @@ def understanding_link_candidates(notes: list[Note]) -> list[dict]:
                 continue
             if note_links_to_target(source, target):
                 continue
-            matched_name = next((name for name in candidate_names(target) if text_mentions_name(body, name)), None)
+            matched_name = next(
+                (name for name in candidate_names(target) if text_mentions_name_in_signal_context(body, name)),
+                None,
+            )
             if not matched_name:
                 continue
             kind = "ownership" if is_ownership_note(target) else "explicit_entity"
