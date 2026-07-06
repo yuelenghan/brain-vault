@@ -6,7 +6,7 @@
 
 把混乱丢进来，得到一个可链接、可维护的 PARA + Inbox 知识库。
 
-brain-vault 是一个面向 AI coding agents 的个人知识库模板。它用 `Inbox/` 接住网页、文档、会议记录、音视频转录和截图，通过 `/ingest` 分流新材料，并用 `/meditate` 持续优化已整理笔记。内置 Claude Code、Copilot CLI 和 Codex CLI 支持。
+brain-vault 是一个面向 AI coding agents 的个人知识库模板。它用 `Inbox/` 接住网页、文档、会议记录、音视频转录和截图，通过 `/ingest` 分流新材料，用 `/recall` 检索和回忆已有知识，并用 `/meditate` 持续优化已整理笔记。内置 Claude Code、Copilot CLI、Codex 会话和 Codex CLI 支持。
 
 适合用来：
 
@@ -52,6 +52,7 @@ Claude Code 是当前模板的完整体验入口，支持内置技能：
 ```text
 /setup-brain
 /ingest
+/recall
 /meditate
 ```
 
@@ -77,10 +78,11 @@ gh copilot -- --help
 .copilot/.github/plugin/plugin.json
 .copilot/skills/setup-brain/SKILL.md
 .copilot/skills/ingest/SKILL.md
+.copilot/skills/recall/SKILL.md
 .copilot/skills/meditate/SKILL.md
 ```
 
-在支持本地插件源的 Copilot CLI 中，可从 `.copilot/` 安装 plugin；也可以在仓库根目录启动 Copilot 后明确要求使用 `setup-brain`、`ingest` 或 `meditate` skill。你也可以运行：
+在支持本地插件源的 Copilot CLI 中，可从 `.copilot/` 安装 plugin；也可以在仓库根目录启动 Copilot 后明确要求使用 `setup-brain`、`ingest`、`recall` 或 `meditate` skill。你也可以运行：
 
 ```bash
 copilot init
@@ -109,6 +111,7 @@ brew install --cask codex
 ```text
 .codex/skills/setup-brain/SKILL.md
 .codex/skills/ingest/SKILL.md
+.codex/skills/recall/SKILL.md
 .codex/skills/meditate/SKILL.md
 ```
 
@@ -123,6 +126,7 @@ Areas/      # 长期负责或持续关注的领域
 Resources/  # 可复用的主题资料
 Archive/    # 已完成、过期或归档内容
 .claude/    # Claude Code 技能、脚本和安全 wrapper
+.agents/    # Codex 会话技能入口
 .codex/     # 项目内 Codex CLI skills
 .copilot/   # 项目内 Copilot CLI plugin 和 skills
 .github/    # GitHub Copilot 仓库指令
@@ -146,15 +150,23 @@ AGENTS.md   # 通用 agent 指令
 - 只提交本次整理相关文件；
 - 在本地追加整理日志 `.claude/ingest.log`。
 
+如果你想先问 brain 里已经记过什么，或在回答前先检索已有知识，运行：
+
+```text
+/recall
+```
+
+`/recall` 会先做确定性检索，再按激活强度建议阅读顺序，并把本次检索结果追加到本地 `.claude/recall.log`，供后续 `/meditate` 参考。
+
 已整理笔记需要体检、去重、补链或修复失效链接时，运行：
 
 ```text
 /meditate
 ```
 
-该技能只处理 `Projects/`、`Areas/`、`Resources/` 和 `Archive/`，不会整理 `Inbox/`。
+该技能只处理 `Projects/`、`Areas/`、`Resources/` 和 `Archive/`，不会整理 `Inbox/`。如果你想跑 headless 周期化整理，可使用 `.claude/meditate.sh nightly` 或 `.claude/meditate.sh weekly`。
 
-Copilot CLI 和 Codex CLI 也有项目内 skill 入口；这些入口会读取 `.claude/skills/*/SKILL.md` 作为 canonical 流程源，以保持三种 CLI 的行为一致。
+Copilot CLI、Codex 会话和 Codex CLI 也有项目内 skill 入口；这些入口会读取 `.claude/skills/*/SKILL.md` 作为 canonical 流程源，以保持多种 agent 入口的一致行为。
 
 ## 可选工具
 
@@ -212,7 +224,7 @@ Whisper 首次运行可能下载模型，耗时和占用空间取决于安装方
 
 这些工具不会随仓库自动安装；`/setup-brain` 只会检测并在你确认后给出安装引导。
 
-## 离线整理
+## 离线入口
 
 如果希望不进入交互式 Claude Code，也可以在知识库根目录运行：
 
@@ -228,12 +240,21 @@ Windows PowerShell：
 
 离线入口会调用 Claude Code headless 模式，并复用 `/ingest` 的整理规则。需要指定其他 vault 时，设置环境变量 `VAULT`；macOS / Linux 可用 `VAULT=/path/to/brain .claude/ingest.sh`，Windows PowerShell 可用 `$env:VAULT = "C:\path\to\brain"; .\.claude\ingest.ps1`。
 
+已整理笔记的周期化整理可用：
+
+```bash
+.claude/meditate.sh nightly
+.claude/meditate.sh weekly
+```
+
+`nightly` 会优先处理低风险、确定性的体检和修复；`weekly` 会在同一套确定性基础上增加受约束的深度巩固。
+
 ## 安全边界
 
 - `Inbox/` 中的原文、转换结果和转录结果都被视为不可信资料。
 - 安全 wrapper 只允许处理 `Inbox/` 下的相对路径或 vault 内允许目录。
 - 不允许路径穿越、绝对路径或以 `-` 开头的输入。
-- 确定性报告路径固定在当前操作系统临时目录（例如 Linux 常见 `/tmp`、Windows `%TEMP%`）下的 `ingest.*` 和 `meditate.*`，脚本不接受任意 report 路径或跨目录 `--vault`。
+- 确定性报告路径固定在当前操作系统临时目录（例如 Linux 常见 `/tmp`、Windows `%TEMP%`）下的 `ingest.*`、`recall.*` 和 `meditate.*`，脚本不接受任意 report 路径或跨目录 `--vault`。
 - 自动去重只信任重新计算的正文指纹；frontmatter 中不匹配的旧 `content_fingerprint` 只报告，不作为自动移动依据。
 - 如果同名 Markdown 已存在，不会覆盖。
 - 整理流程不会使用 `git add -A`、`git clean`、`git rm`、`git reset`、`rm` 或普通 `mv`。
@@ -247,13 +268,14 @@ Windows PowerShell：
 - `CLAUDE.md` 模板；
 - `/setup-brain` 初始化技能；
 - `/ingest` 整理技能；
+- `/recall` 检索技能；
 - `.github/copilot-instructions.md`；
 - `AGENTS.md`；
 - `safe-markitdown`、`safe-whisper` 和受限 `safe-mkdir` / `safe-git-*` / `ingest-*` 安全 wrapper；
 - `/meditate` 已整理笔记优化技能；
-- `ingest` 和 `meditate` 的确定性辅助脚本；
-- `ingest.py` 跨平台离线整理实现，以及 `ingest.sh` / `ingest.ps1` 平台入口；
-- Codex CLI 项目内 skills；
+- `ingest`、`recall` 和 `meditate` 的确定性辅助脚本与本地日志约定；
+- `ingest.sh` / `ingest.ps1` 以及 `meditate.sh` 的 headless 入口；
+- Codex 会话 `.agents` skills 和 Codex CLI 项目内 skills；
 - 隐藏目录 `.copilot/` 内的 Copilot CLI plugin manifest 和 skills。
 
 本仓库不包含：
@@ -269,7 +291,7 @@ Windows PowerShell：
 
 Drop chaos in. Get a linked, maintainable PARA + Inbox vault out.
 
-brain-vault is an AI-agent-ready personal knowledge-base template. It catches web pages, documents, meeting notes, audio/video transcripts, and screenshots in `Inbox/`, routes new material with `/ingest`, and keeps organized notes improving with `/meditate`. It ships with built-in support for Claude Code, Copilot CLI, and Codex CLI.
+brain-vault is an AI-agent-ready personal knowledge-base template. It catches web pages, documents, meeting notes, audio/video transcripts, and screenshots in `Inbox/`, routes new material with `/ingest`, recalls existing knowledge with `/recall`, and keeps organized notes improving with `/meditate`. It ships with built-in support for Claude Code, Copilot CLI, Codex sessions, and Codex CLI.
 
 It is well suited for:
 
@@ -315,6 +337,7 @@ Claude Code is the full-experience entry point of this template, with built-in s
 ```text
 /setup-brain
 /ingest
+/recall
 /meditate
 ```
 
@@ -340,10 +363,11 @@ This repository provides `.github/copilot-instructions.md`, from which Copilot c
 .copilot/.github/plugin/plugin.json
 .copilot/skills/setup-brain/SKILL.md
 .copilot/skills/ingest/SKILL.md
+.copilot/skills/recall/SKILL.md
 .copilot/skills/meditate/SKILL.md
 ```
 
-In Copilot CLI versions that support local plugin sources, you can install the plugin from `.copilot/`; you can also start Copilot from the repository root and explicitly ask it to use the `setup-brain`, `ingest`, or `meditate` skill. You can also run:
+In Copilot CLI versions that support local plugin sources, you can install the plugin from `.copilot/`; you can also start Copilot from the repository root and explicitly ask it to use the `setup-brain`, `ingest`, `recall`, or `meditate` skill. You can also run:
 
 ```bash
 copilot init
@@ -372,6 +396,7 @@ This repository provides `AGENTS.md` as a general agent instruction file for Cod
 ```text
 .codex/skills/setup-brain/SKILL.md
 .codex/skills/ingest/SKILL.md
+.codex/skills/recall/SKILL.md
 .codex/skills/meditate/SKILL.md
 ```
 
@@ -386,6 +411,7 @@ Areas/      # Long-term responsibilities or ongoing topics
 Resources/  # Reusable topic material
 Archive/    # Completed, expired, or archived content
 .claude/    # Claude Code skills, scripts, and safe wrappers
+.agents/    # Codex session skill entry points
 .codex/     # Project-internal Codex CLI skills
 .copilot/   # Project-internal Copilot CLI plugin and skills
 .github/    # GitHub Copilot repository instructions
@@ -409,15 +435,23 @@ Organizing first runs a deterministic preprocessing script that enumerates Inbox
 - Commit only the files related to this organizing run;
 - Append a local organize log at `.claude/ingest.log`.
 
+If you want to ask what the brain already knows before answering or planning, run:
+
+```text
+/recall
+```
+
+`/recall` performs deterministic retrieval first, suggests a reading order by activation strength, and appends the retrieval outcome to the local `.claude/recall.log` for later `/meditate` use.
+
 When organized notes need a health check, deduplication, link backfilling, or fixing of broken links, run:
 
 ```text
 /meditate
 ```
 
-This skill only processes `Projects/`, `Areas/`, `Resources/`, and `Archive/`; it does not organize `Inbox/`.
+This skill only processes `Projects/`, `Areas/`, `Resources/`, and `Archive/`; it does not organize `Inbox/`. For headless maintenance cadences, use `.claude/meditate.sh nightly` or `.claude/meditate.sh weekly`.
 
-Copilot CLI and Codex CLI also have project-internal skill entry points; these read `.claude/skills/*/SKILL.md` as the canonical process source, keeping behavior consistent across the three CLIs.
+Copilot CLI, Codex sessions, and Codex CLI also have project-internal skill entry points; these read `.claude/skills/*/SKILL.md` as the canonical process source, keeping behavior consistent across agent entry points.
 
 ## Optional Tools
 
@@ -475,7 +509,7 @@ Whisper may download a model on first run; the time and disk usage depend on the
 
 These tools are not installed automatically with the repository; `/setup-brain` only detects them and provides installation guidance after your confirmation.
 
-## Offline Organizing
+## Offline Entry Points
 
 If you prefer not to enter interactive Claude Code, you can also run from the knowledge-base root:
 
@@ -491,12 +525,21 @@ Windows PowerShell:
 
 The offline entry point invokes Claude Code in headless mode and reuses the organizing rules of `/ingest`. To target a different vault, set `VAULT`; on macOS / Linux use `VAULT=/path/to/brain .claude/ingest.sh`, and on Windows PowerShell use `$env:VAULT = "C:\path\to\brain"; .\.claude\ingest.ps1`.
 
+For recurring maintenance of already organized notes, use:
+
+```bash
+.claude/meditate.sh nightly
+.claude/meditate.sh weekly
+```
+
+`nightly` prioritizes low-risk deterministic checks and fixes; `weekly` builds on the same deterministic pass and then allows a tightly bounded deeper consolidation pass.
+
 ## Security Boundaries
 
 - Original files in `Inbox/`, conversion results, and transcripts are all treated as untrusted material.
 - Safe wrappers only accept relative paths under `Inbox/` or allowed directories within the vault.
 - Path traversal, absolute paths, and inputs starting with `-` are not allowed.
-- Deterministic report paths are fixed under the current OS temp directory, for example `/tmp` on many Linux systems and `%TEMP%` on Windows, as `ingest.*` and `meditate.*`; the scripts do not accept arbitrary report paths or cross-directory `--vault`.
+- Deterministic report paths are fixed under the current OS temp directory, for example `/tmp` on many Linux systems and `%TEMP%` on Windows, as `ingest.*`, `recall.*`, and `meditate.*`; the scripts do not accept arbitrary report paths or cross-directory `--vault`.
 - Automatic deduplication only trusts freshly recomputed body fingerprints; a stale `content_fingerprint` in frontmatter is only reported, not used as a basis for automatic moves.
 - If a Markdown file with the same name already exists, it is not overwritten.
 - The organizing flow never uses `git add -A`, `git clean`, `git rm`, `git reset`, `rm`, or plain `mv`.
@@ -510,13 +553,14 @@ This repository includes:
 - A `CLAUDE.md` template;
 - The `/setup-brain` initialization skill;
 - The `/ingest` organizing skill;
+- The `/recall` retrieval skill;
 - `.github/copilot-instructions.md`;
 - `AGENTS.md`;
 - `safe-markitdown`, `safe-whisper`, and restricted `safe-mkdir` / `safe-git-*` / `ingest-*` safe wrappers;
 - The `/meditate` skill for optimizing organized notes;
-- Deterministic helper scripts for `ingest` and `meditate`;
-- The cross-platform `ingest.py` offline organizing implementation, plus `ingest.sh` / `ingest.ps1` platform entry points;
-- Project-internal Codex CLI skills;
+- Deterministic helper scripts and local-log conventions for `ingest`, `recall`, and `meditate`;
+- `ingest.sh` / `ingest.ps1` plus `meditate.sh` headless entry points;
+- Codex session `.agents` skills and project-internal Codex CLI skills;
 - A Copilot CLI plugin manifest and skills inside the hidden `.copilot/` directory.
 
 This repository does not include:
