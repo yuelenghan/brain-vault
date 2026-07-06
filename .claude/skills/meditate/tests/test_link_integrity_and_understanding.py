@@ -782,6 +782,34 @@ aliases: [Claude Skills]
 
         self.assertEqual([], report["understanding"]["structure_candidates"])
 
+    def test_concept_rehome_ignores_generic_ml_phrases_that_only_match_broad_topic_profiles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            write_note(vault / "Resources" / "AI Agents" / "README.md", "AI Agents", "index")
+            write_note(
+                vault / "Resources" / "AI Agents" / "Planner Report.md",
+                "Planner Report",
+                "reference",
+                "This technical report studies hidden state control in an agentic workflow.",
+            )
+            write_note(
+                vault / "Resources" / "AI Agents" / "Verifier Report.md",
+                "Verifier Report",
+                "reference",
+                "Another technical report on hidden state evaluation inside an agentic workflow.",
+            )
+            write_note(vault / "Resources" / "LLM Inference" / "README.md", "LLM Inference", "index")
+            write_note(
+                vault / "Resources" / "LLM Inference" / "DSpark 半自回归投机解码.md",
+                "DSpark 半自回归投机解码",
+                "reference",
+                "Speculative decoding uses a hidden state schedule in this technical report about agentic workflow orchestration.",
+            )
+
+            report = optimize_vault.build_report(vault, ["Resources"])
+
+        self.assertEqual([], report["understanding"]["structure_candidates"])
+
     def test_apply_safe_splits_stable_subcluster_into_resource_topic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp).resolve()

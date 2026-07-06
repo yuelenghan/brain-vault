@@ -8,6 +8,7 @@
 # skill directories are whitelisted below.
 .claude/*
 !.claude/ingest.sh
+!.claude/meditate.sh
 !.claude/ingest.py
 !.claude/ingest.ps1
 !.claude/bin/
@@ -20,6 +21,9 @@
 !.claude/bin/ingest-prepare.cmd
 !.claude/bin/ingest-scan
 !.claude/bin/ingest-scan.cmd
+!.claude/bin/meditate-apply-safe
+!.claude/bin/meditate-finalize-log
+!.claude/bin/meditate-scan
 !.claude/bin/safe-git-add
 !.claude/bin/safe-git-add.cmd
 !.claude/bin/safe-git-commit
@@ -40,14 +44,20 @@
 !.claude/skills/ingest/**
 !.claude/skills/setup-brain/
 !.claude/skills/setup-brain/**
+!.claude/skills/recall/
+!.claude/skills/recall/**
 
 .agents/*
 !.agents/skills/
 .agents/skills/*
+!.agents/skills/setup-brain/
+!.agents/skills/setup-brain/**
 !.agents/skills/meditate/
 !.agents/skills/meditate/**
 !.agents/skills/ingest/
 !.agents/skills/ingest/**
+!.agents/skills/recall/
+!.agents/skills/recall/**
 
 .codex/*
 !.codex/skills/
@@ -58,6 +68,8 @@
 !.codex/skills/ingest/**
 !.codex/skills/setup-brain/
 !.codex/skills/setup-brain/**
+!.codex/skills/recall/
+!.codex/skills/recall/**
 
 .copilot/*
 !.copilot/.github/
@@ -72,6 +84,8 @@
 !.copilot/skills/ingest/**
 !.copilot/skills/setup-brain/
 !.copilot/skills/setup-brain/**
+!.copilot/skills/recall/
+!.copilot/skills/recall/**
 
 *.pyc
 __pycache__/

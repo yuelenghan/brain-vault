@@ -1,6 +1,6 @@
 ---
 name: meditate
-description: Meditate on already-organized Projects/Areas/Resources/Archive notes in a brain vault — re-understand existing knowledge, reconnect wikilinks, handle historical duplicates, fix broken links, find missing ownership, build topic indexes, and emit an auditable report. Prefer this skill when the user mentions meditate, 冥想 vault, 知识冥想, 去重, deduplicate, 补链, link repair, 知识库体检, finding duplicate notes, or improving Obsidian wikilinks. Do not use it to organize Inbox; new material still goes through ingest.
+description: Meditate on already-organized Projects/Areas/Resources/Archive notes in a brain vault — re-understand existing knowledge, reconnect wikilinks, handle historical duplicates, fix broken links, find missing ownership, build topic indexes, and emit an auditable report. Prefer this skill when the user mentions meditate, 冥想 vault, 知识冥想, 去重, deduplicate, 补链, link repair, 知识库体检, finding duplicate notes, improving Obsidian wikilinks, or asks for the nightly/weekly sleep-cycle cadence for organized notes. Do not use it to organize Inbox; new material still goes through ingest.
 ---
 
 # Meditate on brain vault
@@ -22,7 +22,20 @@ The working directory is the brain-vault root; all paths are relative to the vau
 
 ## Execution checklist
 
-### 1. Run the deterministic script first
+### 1. Route cadence requests through the headless entry script
+
+When the user explicitly asks for `nightly` or `weekly` cadence, or clearly asks for the light/deep sleep-cycle run, do not reconstruct that flow with ad-hoc `scan` / `apply-safe` commands. From the vault root, run the existing cadence entrypoint instead:
+
+```bash
+.claude/meditate.sh nightly
+.claude/meditate.sh weekly
+```
+
+- Treat these two commands as part of the meditate skill contract, not as an out-of-band manual-only fallback.
+- After the cadence script finishes, inspect its result (`git status --short`, latest commit when one exists, and `.claude/meditate.log` if needed) and report the outcome using the normal final-output structure below.
+- Use the lower-level deterministic script flow in the next section only for normal interactive meditate runs, analyze-only runs, scoped runs, or when debugging the cadence entry script itself.
+
+### 2. Run the deterministic script first
 
 Prefer letting the script handle scanning, indexing, exact deduplication, broken-link unique matching, metadata coverage, and report generation, to avoid nondeterminism from model-driven manual sweeps.
 
@@ -60,12 +73,14 @@ python3 .claude/skills/meditate/scripts/optimize_vault.py \
 - When the user specifies a topic or directory, append one or more `--scope <directory>` to the script.
 - The script's JSON / Markdown output is fixed to `/tmp/meditate.json` and `/tmp/meditate.md`; do not pass other report paths, do not pass `--vault`, and run from the vault root.
 - The script's JSON output is the primary source of truth; before the final answer you must Read `/tmp/meditate.md` or the JSON summary.
+- The report also includes `retrieval_stats`, `staleness_report`, `synthesis_candidates`, and `restatement_candidates`. Treat these as part of the core meditate contract: retrieval feedback comes from `.claude/recall.log`, staleness is a report/apply-safe demotion signal only, and synthesis/restatement are deep-run inputs rather than blanket rewrite permission.
 - The script only trusts recomputed source-material fingerprints; `source_fingerprint` is the preferred strict field, while legacy `content_fingerprint` is accepted for backward compatibility and is not treated as a strict stale/invalid signal. If the report lists `invalid_fingerprints` / `stale_or_invalid_fingerprint`, do not auto-dedupe based on those stale frontmatter fingerprints — prefer to report or clean them manually.
 - After running the script, continue checking the report for orphan notes, ownership gaps, topic-index gaps, and high-confidence semantic link additions; as long as they are non-protected, clearly-evidenced, and small, fix them directly and record — do not stop at "suggestion".
 - If `apply-safe` produces no changes but there are many protected paths, do not misread it as failure; explain the script skipped them to protect pre-existing uncommitted changes, and give the next step: commit/clean those changes and rerun, or narrow scope with `--scope <directory>`.
 - If the script errors, report the error first; do not fall back to large-scale model-driven edits to the library.
+- In headless / allowlist-restricted automation, use `.claude/bin/meditate-scan`, `.claude/bin/meditate-apply-safe <YYYY-MM-DD> [--scope ...] [--progress]`, and `.claude/bin/meditate-finalize-log <commit>` rather than inventing alternate entrypoints.
 
-### 2. Deterministic logic owned by the script
+### 3. Deterministic logic owned by the script
 
 The script `.claude/skills/meditate/scripts/optimize_vault.py`, together with its local deterministic knowledge model module, owns:
 
@@ -89,11 +104,15 @@ The script `.claude/skills/meditate/scripts/optimize_vault.py`, together with it
 - Deterministically re-understanding structure: when a material note's current title/body evidence points to a unique existing `Resources/<topic>/` title or alias, move the note with `git mv`; when two resource topics are equivalent by current topic names/aliases such as singular/plural variants, merge material notes into the canonical topic with `git mv`; when a note strongly overlaps a unique topic concept profile, re-home it by concept evidence even if the body does not spell the topic name; when all notes in a broad Resource topic share a more specific title-leading topic or title-contained concept topic, rename/re-home the material notes into that narrower `Resources/<topic>/`; when a broad Resource topic contains a stable, distinctive title-leading or title-contained concept subcluster and the best split is unique, move those notes into a new narrower `Resources/<subtopic>/` with `git mv`. Structural moves must also protect inbound path-qualified wikilinks: if a note linking to the old path has pre-existing uncommitted changes, the linking note is outside the requested `--scope`, or the target filename stem is not unique in the PARA index and therefore cannot be safely repaired to a bare wikilink, skip the move and report it instead of creating a broken link that cannot be safely repaired within the current run; otherwise repair in-scope path-qualified wikilinks to the moved note's filename stem during the structural move, preserving anchors and aliases.
 - Reporting Resource topic split decisions: for broad topics, explain whether a stable title-leading or title-contained concept subcluster is safe to split, ambiguous, or below threshold, so skipped restructuring is auditable rather than silent.
 - Under `apply-safe`: metadata backfill, exact-duplicate `git mv` archival, unique broken-link repair, empty stub deletion, writing `.claude/meditate.log`.
-- Under `apply-safe`: topic-index creation/update for non-protected `Resources/<topic>/` directories with 3+ reference notes, including missing README creation, missing marker insertion, and stale marker block refresh.
+- Under `apply-safe`: topic-index creation/update for non-protected `Resources/<topic>/` directories with 3+ reference notes, including missing README creation, missing marker insertion, and stale marker block refresh. Resource-index ordering must reflect current salience and recent retrieval frequency, while dormant/stale notes are demoted to the tail and labeled `（休眠）`.
 - Under `apply-safe`: strongly-evidenced source-file normalization via `git mv` plus note-reference repair, changing `source_file` and the visible `原始文件：[[...]]` line to `source/<Markdown stem>.<extension>`.
+- Parsing `.claude/recall.log` into deterministic `retrieval_stats`: recent per-note retrieval counts, answered/partial/miss ratios, co-activation pairs, and high-gap topics.
+- Deriving deterministic `staleness_report` candidates from last-modified age, inbound links, and recent retrieval counts; `apply-safe` may only update `last_relevance_check` and resource-index ordering, never delete notes.
+- Deriving deterministic `synthesis_candidates` when a topic has 5+ material notes and its README lacks a synthesis block or lags current coverage by 3+ materials.
+- Deriving deterministic `restatement_candidates` when a note already has `## 提炼` but related same-topic material added since the last `### 再巩固 <YYYY-MM-DD>` shares at least 3 stable concepts across 3+ peer notes.
 - Generating a fixed-structure Markdown / JSON report, splitting `applied`, `report_only`, `skipped_uncertain`, `verification`.
 
-### 3. Judgment still owned by the model
+### 4. Judgment still owned by the model
 
 The script handles deterministic re-understanding: explicit title / alias / filename-stem mentions, ownership concept profiles and back-links, stable unowned topic → Area creation, auto-created Area refresh, equivalent auto-created Area merge/archive, stable subcluster → child Area split, topic concept profiles, topic re-homing, concept re-homing, and equivalent-topic merges that can be proven from the current vault index. Broader semantic judgment remains with the model after reading the script report:
 
@@ -102,7 +121,7 @@ The script handles deterministic re-understanding: explicit title / alias / file
 - Judge and fix missing ownership or topic index beyond deterministic candidates: when a suitable Area / Project exists, add a wikilink and resource index; when a stable unowned topic meets the script's threshold, let `apply-safe` create the Area automatically; when evidence is weaker or ambiguous, report why auto-creation was skipped. When a topic directory has 3+ notes and no index, you may create a short README / Map of Content.
 - For structural changes, prefer automatic execution when evidence is unique and reversible. Skip only when the target is ambiguous, protected, collides with an existing destination, or would require deleting/clearing note bodies.
 
-### 4. Historical deduplication
+### 5. Historical deduplication
 
 Classify by evidence strength:
 
@@ -129,7 +148,7 @@ Includes: highly-similar titles but different URL / fingerprint, large overlappi
 
 Belonging to the same Loop Engineering, Agent Memory, PKM, etc. topic but with different viewpoints should be kept as separate material; the optimization focus is link addition and ownership, not merging.
 
-### 5. Link analysis and link addition
+### 6. Link analysis and link addition
 
 As material grows, early notes may lack links to later-related ones. Add links in this order:
 
@@ -141,7 +160,7 @@ As material grows, early notes may lack links to later-related ones. Add links i
 - **Empty stub detection and cleanup**: Obsidian auto-creates 0-byte `.md` files when a broken wikilink is clicked in the graph view or a note. These stubs are invisible to the script's normal PARA-directory scan and typically appear at the vault root (for bare `[[Note Name]]`) or in `Inbox/` (for `[[Inbox/Note Name]]`). The script's `empty_stubs` detection scans the entire vault for 0-byte `.md` files (excluding `.claude/`, `.agents/`, `.codex/`, `.copilot/`, `.github/`, `.git/`, `.obsidian/`), finds only wikilinks that would resolve to that exact stub path, and matches them to the correct target note via title/alias loose matching. In `apply-safe` mode, fixable stubs are handled by: (1) fixing all causal wikilinks to point to the actual note's filename stem, then (2) deleting the empty stub. If any causal wikilink is protected or cannot be rewritten, keep the stub and report the blocked cause; deleting the stub while the causal link remains would let Obsidian recreate it. Stubs with no clear target are only reported, not auto-deleted — manual review is required. **This is the last line of defense**: a stub's existence means a broken wikilink was already clicked and Obsidian already polluted the vault; cleaning the stub without fixing the causal wikilinks just means the stub will reappear on the next click.
 - **Avoid over-linking**: at most 1-5 high-confidence new links per note per run; do not fully cross-connect every note under the same topic.
 
-### 6. Structure and metadata optimization
+### 7. Structure and metadata optimization
 
 Beyond dedup and linking, check these low-risk optimizations:
 
@@ -156,7 +175,7 @@ Beyond dedup and linking, check these low-risk optimizations:
 - **frontmatter value validation**: the scan report's `invalid_frontmatter` lists notes whose `---` fences are on line 1 but have issues that break Obsidian properties: (a) an unquoted scalar value contains `: ` (colon+space), (b) values wrapped in smart/curly quotes (`“”‘’`) which YAML doesn't recognize as string delimiters. Both cause Obsidian to silently drop all properties / Dataview. For (a), fix by hand: double-quote the offending value with straight quotes. For (b), `fix_frontmatter.py` can auto-replace smart quotes with straight quotes. Quoted strings, flow collections, list items, and `sha256:abc` (colon with no space) are not flagged.
 - **Duplicate tags / status inconsistency**: minimal corrections are fine, e.g. `status: inbox` left behind in an organized directory. `status` should express lifecycle only (`active` / `done` / `archived`); legacy `status: resource/area/project` is only reported, not auto-changed; do not reorder frontmatter at scale.
 
-### 7. Modify and stage
+### 8. Modify and stage
 
 Allowed auto-modifications are limited to (anything not in this list is report-only, not executed):
 
@@ -178,10 +197,12 @@ Allowed auto-modifications are limited to (anything not in this list is report-o
 - The script's `apply-safe` creating/updating generated topic relation blocks inside topic README files when two Resource topics share pair- or small-cluster-distinctive stable concepts and both READMEs are non-protected
 - The script's `apply-safe` adding reciprocal `## 相关承接` bullets between auto-created/source-topic Area owners when their Resource topics share pair- or small-cluster-distinctive stable concepts
 - The script's `apply-safe` creating/updating non-protected topic README resource-index sections for deterministic topic-index gaps
+- The script's `apply-safe` demoting stale notes by updating `last_relevance_check` and by re-rendering topic resource-index blocks with active notes first and `（休眠）` notes last
 - The script's `apply-safe` writing `.claude/meditate.log`
 - Running `.claude/skills/meditate/scripts/fix_frontmatter.py` to repair frontmatter structure for non-protected notes (first line not `---` or no frontmatter)
 - Running `.claude/skills/meditate/scripts/generate_resource_index.py --dir "Resources/<topic>"` to update the resource-index marker block for a non-protected topic README (only when the README already has the marker block)
 - The model, on top of the script report, adding a few high-confidence semantic `[[wikilinks]]`, ownership resource indexes, or small topic indexes to non-protected Markdown
+- In weekly deep runs, refreshing at most 2 synthesis blocks and appending at most 3 `### 再巩固 <YYYY-MM-DD>` sections, always inside marker-block or append-only boundaries
 
 Forbidden:
 
@@ -195,7 +216,7 @@ Forbidden:
 
 File moves are only allowed via the script's `git mv`; after changes only `git add` this run's changed files and `.claude/meditate.log`.
 
-### 8. Pre-commit self-check
+### 9. Pre-commit self-check
 
 Run `git status --short` and confirm:
 
@@ -212,12 +233,19 @@ Run `git status --short` and confirm:
 
 When unsatisfied, do not commit; undo safely with a reverse `git mv` or Edit if possible, otherwise stop and report.
 
-### 9. Log and commit
+### 10. Log and commit
 
 - When there are committable optimization results, commit only the staged files from this run: `git commit -m "meditate: <summary>"`.
 - After a normal commit run `git log -1 --format=%H`, then run `python3 .claude/skills/meditate/scripts/optimize_vault.py --mode finalize-log --commit <hash>`; the `commit:` in the log may only use the hash just output.
 - Before writing the log, Read `.claude/meditate.log`; create it if it does not exist. Never overwrite and lose history.
 - When only analyzing with no changes, do not commit; the log still records a report summary, `commit: 无`.
+
+### 11. Automation cadence
+
+- `.claude/meditate.sh nightly` is the light sleep cycle: run scan first, skip Claude entirely when there are no actionable deterministic items, otherwise let headless Claude execute `apply-safe` with wrappers and finalize the local log.
+- `.claude/meditate.sh weekly` is the deep cycle: do the same deterministic pass, then allow at most 2 synthesis candidates and 3 restatement candidates from `/tmp/meditate.json`. The runtime wrapper must pass the explicit allowed target paths into the headless prompt, block staged semantic writes to non-candidate files before commit, and fail the post-run audit if a weekly commit still drifts outside the report candidates.
+- If protected paths exceed the script threshold, headless automation must degrade to scan-only and append a no-commit log entry instead of forcing edits through.
+- `.claude/meditate.log` stays local and ignored; only the actual vault changes produced and committed by the run enter git.
 
 Log format:
 
@@ -231,11 +259,13 @@ Log format:
 - 元数据补全：<count>
 - 结构迁移：<count>
 - 概念画像：<count>
+- 语义综合：<count>
+- 再巩固：<count>
 - 结构建议：<count>
 commit: <hash or 无>
 ```
 
-### 10. Final output
+### 12. Final output
 
 Keep the user-facing output concise and consistently separate "what was done" from "what was not". Even when a category is empty, write `无`, so the user does not think something was missed. If no changes were made because of protected paths, clearly write "脚本自检通过，但为保护运行前已有改动，本次只报告/跳过这些路径" (script self-check passed, but to protect pre-existing changes this run only reports/skips these paths) — do not claim these files were optimized.
 

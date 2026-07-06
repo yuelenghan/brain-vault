@@ -1,6 +1,6 @@
 ---
 name: setup-brain
-description: Initialize a brain-vault — interview the user for identity and goals, generate CLAUDE.md, check PARA directories, git status, local conversion tools (markitdown, Pillow, whisper, ffmpeg) and AI CLIs (copilot, codex), and install missing tools on user confirmation. Triggers: setup brain, initialize brain-vault, 初始化 brain-vault, 安装工具.
+description: Initialize a brain-vault — interview the user for identity and goals, generate AGENTS.md, check PARA directories, git status, local conversion tools (markitdown, Pillow, whisper, ffmpeg) and AI CLIs (copilot, codex), and install missing tools on user confirmation. Triggers: setup brain, initialize brain-vault, 初始化 brain-vault, 安装工具.
 ---
 
 # Setup Brain
@@ -11,7 +11,7 @@ You are the brain-vault initialization wizard. The goal is a safe, repeatable in
 
 - The working directory should be the brain-vault root.
 - If the current directory is not a git repository, say so first and ask whether to initialize git.
-- If `CLAUDE.md` already contains real user content, do not silently overwrite it; read it first and explain which sections will be updated.
+- If `AGENTS.md` already contains real user content, do not silently overwrite it; read it first and explain which sections will be updated.
 
 ## Initialization flow
 
@@ -44,15 +44,15 @@ Ask for the essential information in one pass to avoid repeated interruptions:
 1. Who are you? Role, main responsibilities, professional focus?
 2. What are the most important goals for this year or near term?
 3. What are the active projects? One sentence per project.
-4. How do you want Claude to collaborate? For example, preference for concise conclusions, detailed reasoning, autonomous execution, cautious confirmation, etc.
+4. How do you want Codex to collaborate? For example, preference for concise conclusions, detailed reasoning, autonomous execution, cautious confirmation, etc.
 5. Which file formats do you plan to organize? Should document/data/web/Notebook conversion (Word/PDF/PPT/Excel/TXT/CSV/JSON/HTML/EPUB/IPYNB → Markdown) and screenshot-placeholder capability (image → Markdown placeholder) be enabled?
 6. Should audio/video transcription (audio/video → Markdown) be enabled? If yes, do you accept downloading the Whisper model on first real transcription, and do you need to specify a model or language?
 7. Do you need Copilot CLI or Codex CLI support?
-8. Do you need offline auto-organize? If yes, do you prefer running `ingest.sh` manually, system crontab/launchd, or in-session Claude Code scheduling?
+8. Do you need offline auto-organize? If yes, do you prefer running `ingest.sh` manually, system crontab/launchd, or in-session Codex scheduling?
 
 If the user only wants a quick initialization, conservative defaults are acceptable: keep existing collaboration preferences, create empty PARA directories, and only detect tools without installing.
 
-### 3. Generate or update CLAUDE.md
+### 3. Generate or update AGENTS.md
 
 Update these sections from the user's answers:
 
@@ -234,7 +234,7 @@ python3 -m json.tool .copilot/.github/plugin/plugin.json >/tmp/brain-vault-plugi
 
 If the user wants auto-organize, explain the three options. The default recommendation is now **ingest + meditate rhythm**: run `ingest` first, then `meditate` after it. Nightly cadence = `ingest.sh` then `meditate.sh nightly`; weekly cadence = `ingest.sh` then `meditate.sh weekly`.
 
-- In-session: use a Claude Code scheduled task to trigger `/ingest` and `/meditate`; closing the session or task expiry affects execution.
+- In-session: use a Codex scheduled task to trigger `/ingest` and `/meditate`; closing the session or task expiry affects execution.
 - System-level: use crontab/launchd to run `VAULT=/path/to/brain .claude/ingest.sh` and then `VAULT=/path/to/brain .claude/meditate.sh nightly`, plus a weekly `VAULT=/path/to/brain .claude/meditate.sh weekly`.
 - Manual: periodically run `/ingest`, `/meditate`, `.claude/ingest.sh`, or `.claude/meditate.sh [nightly|weekly]`.
 

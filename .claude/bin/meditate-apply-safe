@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Run meditate apply-safe with fixed report paths."""
+
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+SCRIPT = Path(".claude/skills/meditate/scripts/optimize_vault.py")
+REPORT_DIR = Path(os.environ.get("MEDITATE_TEST_REPORT_DIR") or tempfile.gettempdir()).resolve()
+JSON_REPORT = str(REPORT_DIR / "meditate.json")
+MARKDOWN_REPORT = str(REPORT_DIR / "meditate.md")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?$")
+
+
+def main(argv: list[str]) -> int:
+    if not argv or not DATE_RE.match(argv[0]):
+        print("meditate-apply-safe: expected date, then optional --scope <dir> and --progress", file=sys.stderr)
+        return 2
+    passthrough: list[str] = []
+    index = 1
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--progress":
+            passthrough.append(arg)
+            index += 1
+            continue
+        if arg == "--scope" and index + 1 < len(argv):
+            passthrough.extend([arg, argv[index + 1]])
+            index += 2
+            continue
+        print("meditate-apply-safe: unsupported arguments", file=sys.stderr)
+        return 2
+    return subprocess.run(
+        [
+            "python3",
+            str(SCRIPT),
+            "--mode",
+            "apply-safe",
+            "--json",
+            JSON_REPORT,
+            "--markdown",
+            MARKDOWN_REPORT,
+            "--date",
+            argv[0],
+            *passthrough,
+        ],
+        check=False,
+    ).returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

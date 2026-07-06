@@ -3,8 +3,47 @@
 
 from __future__ import annotations
 
+import importlib.util
+import json
+import os
 import subprocess
 import sys
+from pathlib import Path
+
+
+GUARD_REPORT_ENV = "MEDITATE_WEEKLY_REPORT"
+GUARD_SCRIPT = Path(__file__).resolve().parents[1] / "skills" / "meditate" / "scripts" / "cadence_guard.py"
+
+
+def load_guard_module():
+    spec = importlib.util.spec_from_file_location("meditate_cadence_guard_for_commit", GUARD_SCRIPT)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load cadence guard from {GUARD_SCRIPT}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def enforce_weekly_guard() -> int:
+    report_path = os.environ.get(GUARD_REPORT_ENV, "").strip()
+    if not report_path:
+        return 0
+    try:
+        guard = load_guard_module()
+        summary = guard.audit_weekly_staged_changes(Path.cwd(), guard.load_report(Path(report_path)))
+    except Exception as exc:  # pragma: no cover - defensive wrapper path
+        print(f"safe-git-commit: unable to load weekly semantic guard: {exc}", file=sys.stderr)
+        return 2
+    if summary["unauthorized_synthesis_paths"] or summary["unauthorized_restatement_paths"]:
+        print(
+            "safe-git-commit: weekly semantic targets drifted from /tmp/meditate.json: "
+            + guard.format_unauthorized_message(summary),
+            file=sys.stderr,
+        )
+        print(json.dumps(summary, ensure_ascii=False), file=sys.stderr)
+        return 2
+    return 0
 
 
 def main(argv: list[str]) -> int:
@@ -15,6 +54,9 @@ def main(argv: list[str]) -> int:
     if not message.strip() or "\x00" in message or "\n" in message or message.startswith("-"):
         print("safe-git-commit: invalid commit message", file=sys.stderr)
         return 2
+    guard_rc = enforce_weekly_guard()
+    if guard_rc != 0:
+        return guard_rc
     return subprocess.run(["git", "commit", "-m", message], check=False).returncode
 
 
