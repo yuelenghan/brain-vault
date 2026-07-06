@@ -1,6 +1,6 @@
 ---
 name: recall
-description: 回忆 brain vault 中已整理的知识：基于标题、别名、概念画像和 wikilink 扩散检索相关笔记，并把提取结果写回 `.claude/recall.log`。用户提到回忆、recall、问 brain、brain 里有什么、检索笔记、我之前记过什么、查一下笔记时，应优先使用本 skill。
+description: 回忆 brain vault 中已整理的知识：基于标题、别名、概念画像和 wikilink 扩散检索相关笔记，并把提取结果写回 `.claude/recall.log`。用户提到回忆、recall、问 brain、brain 里有什么、检索笔记、我之前记过什么、查一下笔记时，以及任何需要参考 vault 已有笔记回答的知识性、方案性、项目相关问题（即使用户没有明说检索），都必须先走本 skill，不得用裸 grep/read 代替。
 ---
 
 # Recall for Codex CLI

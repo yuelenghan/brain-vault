@@ -13,7 +13,7 @@
 ## 协作偏好
 
 - 有根据、不瞎编：结论、命令、参数要有可验证来源；不确定就说明。
-- 默认参考 brain：回答知识性、方案性、项目相关问题时，必须先检索并参考本 vault 中已有内容；只有 brain 中没有相关内容或信息明显不足时，才使用通用知识，并在回答中说明未在 brain 中找到充分依据。
+- 默认参考 brain：回答知识性、方案性、项目相关问题时，必须先通过 `.claude/skills/recall/SKILL.md` 检索并参考本 vault 中已有内容，不得用裸 Grep/Read 代替；只有 brain 中没有相关内容或信息明显不足时，才使用通用知识，并在回答中说明未在 brain 中找到充分依据。
 - 能自动执行就别问；只在关键决策、不可逆操作或会影响结果的分歧上确认。
 - 产出分层：给人看的结论简洁；落地文档详细、可执行。
 - 简单优先：不添加未请求的功能、抽象或复杂流程。
@@ -41,6 +41,7 @@
 
 - 初始化 brain：运行 `/setup-brain`。
 - 手动整理 Inbox：运行 `/ingest`。
+- 检索 / 回忆 brain：运行 `/recall`；显式回忆和任何需要参考已有笔记的问题都先走它；固定报告路径使用当前操作系统 temp 目录，事件写入 `.claude/recall.log`（本地日志，不进 git）。
 - 优化已整理笔记：运行 `/meditate`。
 - 离线兜底整理：macOS / Linux 在 vault 根目录运行 `.claude/ingest.sh`；Windows PowerShell 运行 `.claude/ingest.ps1`。
 - Copilot CLI：在 vault 根目录运行 `copilot`，并参考 `.github/copilot-instructions.md`。
