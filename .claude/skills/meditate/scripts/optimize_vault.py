@@ -14,6 +14,7 @@ import sys
 import tempfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -39,7 +40,9 @@ TOPIC_RELATIONS_BEGIN = "<!-- BEGIN: topic-relations -->"
 TOPIC_RELATIONS_END = "<!-- END: topic-relations -->"
 OWNERSHIP_RELATIONS_BEGIN = "<!-- BEGIN: ownership-relations -->"
 OWNERSHIP_RELATIONS_END = "<!-- END: ownership-relations -->"
-FIXED_REPORT_DIR = Path(tempfile.gettempdir()).resolve()
+SYNTHESIS_BEGIN = "<!-- BEGIN: synthesis -->"
+SYNTHESIS_END = "<!-- END: synthesis -->"
+FIXED_REPORT_DIR = Path(os.environ.get("MEDITATE_TEST_REPORT_DIR") or tempfile.gettempdir()).resolve()
 FIXED_JSON_REPORT = FIXED_REPORT_DIR / "meditate.json"
 FIXED_MARKDOWN_REPORT = FIXED_REPORT_DIR / "meditate.md"
 SOURCE_EXTENSIONS = {
@@ -76,6 +79,12 @@ SOURCE_EXTENSIONS = {
     ".opus",
     ".webm",
 }
+RECALL_HEADER_RE = re.compile(r"^## (?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}) recall$")
+RECALL_QUERY_RE = re.compile(r"^- 查询[:：](?P<query>.+)$")
+RECALL_ACTIVATION_RE = re.compile(r"^- 激活[:：](?P<path>.+?) \((?P<strength>[^)]+)\)$")
+RECALL_RESULT_RE = re.compile(r"^- 结果[:：](?P<result>answered|partial|miss)$")
+RECALL_GAP_RE = re.compile(r"^- 缺口[:：](?P<topic>.+)$")
+RECONSOLIDATION_RE = re.compile(r"^### 再巩固 (?P<date>\d{4}-\d{2}-\d{2})$", re.MULTILINE)
 
 
 def load_sibling_module(module_name: str, filename: str):
@@ -2287,7 +2296,25 @@ def resource_topic_dirs(vault: Path, scopes: list[str]) -> list[Path]:
     return sorted(topics)
 
 
-def resource_index_items(topic_dir: Path) -> list[dict]:
+def retrieval_count_map(retrieval: dict | None) -> dict[str, int]:
+    return {
+        item["path"]: int(item.get("retrieval_count", 0))
+        for item in (retrieval or {}).get("notes") or []
+        if item.get("path")
+    }
+
+
+def staleness_status_map(staleness: dict | None) -> dict[str, str]:
+    return {
+        item["path"]: item.get("status", "")
+        for item in (staleness or {}).get("candidates") or []
+        if item.get("path")
+    }
+
+
+def resource_index_items(topic_dir: Path, retrieval: dict | None = None, staleness: dict | None = None) -> list[dict]:
+    retrieval_counts = retrieval_count_map(retrieval)
+    staleness_by_path = staleness_status_map(staleness)
     items: list[dict] = []
     for md in sorted(topic_dir.glob("*.md")):
         if md.name.lower() == "readme.md":
@@ -2304,9 +2331,29 @@ def resource_index_items(topic_dir: Path) -> list[dict]:
         source = strip_quotes(
             frontmatter.get("source_url", "") or frontmatter.get("source_file", "") or frontmatter.get("source", "")
         ).strip()
-        items.append({"title": title, "file": md.name, "created": created, "source": source})
+        rel = md.relative_to(topic_dir.parents[1]).as_posix()
+        items.append(
+            {
+                "title": title,
+                "file": md.name,
+                "created": created,
+                "source": source,
+                "path": rel,
+                "retrieval_count": retrieval_counts.get(rel, 0),
+                "salience": strip_quotes(frontmatter.get("salience", "")).strip().lower(),
+                "staleness": staleness_by_path.get(rel, ""),
+            }
+        )
     items.sort(key=lambda item: item["file"])
     items.sort(key=lambda item: item["created"], reverse=True)
+    items.sort(
+        key=lambda item: (
+            item["staleness"] in {"dormant", "stale"},
+            -(1 if item["salience"] == "high" else 0),
+            -int(item["retrieval_count"]),
+            item["file"],
+        )
+    )
     return items
 
 
@@ -2317,10 +2364,11 @@ def render_resource_index(items: list[dict]) -> str:
     for item in items:
         link = f"[[{item['file'][:-3]}]]"
         created = item["created"] or "—"
+        dormant_label = "（休眠）" if item.get("staleness") in {"dormant", "stale"} else ""
         if item["source"]:
-            lines.append(f"- {link}（{created}）— {item['source']}")
+            lines.append(f"- {link}{dormant_label}（{created}）— {item['source']}")
         else:
-            lines.append(f"- {link}（{created}）")
+            lines.append(f"- {link}{dormant_label}（{created}）")
     lines.append("")
     lines.append(RESOURCE_INDEX_END)
     return "\n".join(lines)
@@ -2634,10 +2682,16 @@ def upsert_ownership_relations_section(text: str, expected_relations: str) -> st
     return "\n".join(output) + ("\n" if trailing_newline else "")
 
 
-def topic_index_gaps(vault: Path, scopes: list[str], protected: set[str]) -> list[dict]:
+def topic_index_gaps(
+    vault: Path,
+    scopes: list[str],
+    protected: set[str],
+    retrieval: dict | None = None,
+    staleness: dict | None = None,
+) -> list[dict]:
     gaps: list[dict] = []
     for topic_dir in resource_topic_dirs(vault, scopes):
-        items = resource_index_items(topic_dir)
+        items = resource_index_items(topic_dir, retrieval=retrieval, staleness=staleness)
         readme = topic_dir / "README.md"
         topic_rel = topic_dir.relative_to(vault).as_posix()
         readme_rel = readme.relative_to(vault).as_posix()
@@ -2786,6 +2840,381 @@ def invalid_frontmatter_list(notes: list[Note]) -> list[dict]:
     ]
 
 
+def today_local() -> date:
+    return datetime.now().date()
+
+
+def parse_iso_date(raw: str | None) -> date | None:
+    if not raw:
+        return None
+    raw = strip_quotes(str(raw).strip())
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def recall_log_entries(vault: Path) -> list[dict]:
+    log_path = vault / ".claude" / "recall.log"
+    if not log_path.exists() or not log_path.is_file():
+        return []
+    try:
+        lines = log_path.read_text(encoding="utf-8").splitlines()
+    except UnicodeDecodeError:
+        return []
+
+    entries: list[dict] = []
+    current: dict | None = None
+    for line in lines:
+        header = RECALL_HEADER_RE.match(line.strip())
+        if header:
+            if current and current.get("timestamp") and current.get("result"):
+                entries.append(current)
+            current = {
+                "timestamp": datetime.strptime(header.group("ts"), "%Y-%m-%d %H:%M"),
+                "query": "",
+                "activated": [],
+                "result": "",
+                "gap_topic": None,
+            }
+            continue
+        if current is None:
+            continue
+        query_match = RECALL_QUERY_RE.match(line.strip())
+        if query_match:
+            current["query"] = query_match.group("query").strip()
+            continue
+        activation_match = RECALL_ACTIVATION_RE.match(line.strip())
+        if activation_match:
+            current["activated"].append(
+                {
+                    "path": activation_match.group("path").strip(),
+                    "strength": activation_match.group("strength").strip(),
+                }
+            )
+            continue
+        result_match = RECALL_RESULT_RE.match(line.strip())
+        if result_match:
+            current["result"] = result_match.group("result")
+            continue
+        gap_match = RECALL_GAP_RE.match(line.strip())
+        if gap_match:
+            topic = gap_match.group("topic").strip()
+            current["gap_topic"] = None if topic in {"", "无"} else topic
+    if current and current.get("timestamp") and current.get("result"):
+        entries.append(current)
+    return entries
+
+
+def recent_recall_entries(vault: Path, days: int) -> list[dict]:
+    threshold = datetime.now() - timedelta(days=days)
+    return [entry for entry in recall_log_entries(vault) if entry["timestamp"] >= threshold]
+
+
+def retrieval_stats(vault: Path, notes: list[Note], days: int = 90) -> dict:
+    entries = recent_recall_entries(vault, days)
+    note_metrics: dict[str, dict] = defaultdict(
+        lambda: {
+            "retrieval_count": 0,
+            "answered_count": 0,
+            "partial_count": 0,
+            "miss_count": 0,
+            "strengths": Counter(),
+        }
+    )
+    result_counts: Counter[str] = Counter()
+    gap_counts: Counter[str] = Counter()
+    coactivation_counts: Counter[tuple[str, str]] = Counter()
+    note_paths = {note.path for note in notes}
+
+    for entry in entries:
+        result = entry.get("result") or ""
+        if result:
+            result_counts[result] += 1
+        if entry.get("gap_topic"):
+            gap_counts[entry["gap_topic"]] += 1
+        activated_paths = [
+            item["path"]
+            for item in entry.get("activated") or []
+            if item.get("path") in note_paths
+        ]
+        for item in entry.get("activated") or []:
+            path = item.get("path")
+            if path not in note_paths:
+                continue
+            stats = note_metrics[path]
+            stats["retrieval_count"] += 1
+            if result:
+                stats[f"{result}_count"] += 1
+            stats["strengths"][item.get("strength") or "unknown"] += 1
+        unique_paths = sorted(set(activated_paths))
+        for index, left in enumerate(unique_paths):
+            for right in unique_paths[index + 1 :]:
+                coactivation_counts[(left, right)] += 1
+
+    note_index = {note.path: note for note in notes}
+    note_items = []
+    for path, stats in note_metrics.items():
+        note = note_index.get(path)
+        note_items.append(
+            {
+                "path": path,
+                "title": note.title if note else Path(path).stem,
+                "topic": resource_topic_name(path),
+                "retrieval_count": stats["retrieval_count"],
+                "answered_count": stats["answered_count"],
+                "partial_count": stats["partial_count"],
+                "miss_count": stats["miss_count"],
+                "strengths": dict(sorted(stats["strengths"].items())),
+            }
+        )
+    note_items.sort(key=lambda item: (-item["retrieval_count"], item["path"]))
+
+    total_results = sum(result_counts.values())
+    return {
+        "window_days": days,
+        "entries_total": len(entries),
+        "counts": {key: int(value) for key, value in sorted(result_counts.items())},
+        "answered_ratio": round(result_counts.get("answered", 0) / total_results, 3) if total_results else 0.0,
+        "partial_ratio": round(result_counts.get("partial", 0) / total_results, 3) if total_results else 0.0,
+        "miss_ratio": round(result_counts.get("miss", 0) / total_results, 3) if total_results else 0.0,
+        "notes": note_items,
+        "high_gap_topics": [
+            {"topic": topic, "count": count}
+            for topic, count in sorted(gap_counts.items(), key=lambda item: (-item[1], item[0]))
+        ],
+        "coactivation_pairs": [
+            {"paths": [left, right], "count": count}
+            for (left, right), count in sorted(coactivation_counts.items(), key=lambda item: (-item[1], item[0]))
+        ],
+    }
+
+
+def note_last_modified(vault: Path, note: Note) -> tuple[datetime | None, str]:
+    completed = run_git(vault, ["log", "-1", "--format=%ct", "--", note.path])
+    if completed.returncode == 0 and completed.stdout.strip().isdigit():
+        return datetime.fromtimestamp(int(completed.stdout.strip())), "git"
+    try:
+        return datetime.fromtimestamp(note.abs_path.stat().st_mtime), "filesystem"
+    except OSError:
+        return None, "missing"
+
+
+def archive_suggestion(path: str) -> str:
+    rel = Path(path)
+    if len(rel.parts) >= 3 and rel.parts[0] == "Resources":
+        target = Path("Archive") / rel.parts[1] / rel.name
+    else:
+        target = Path("Archive") / rel.name
+    return f'git mv "{path}" "{target.as_posix()}"'
+
+
+def source_wikilinks(note: Note) -> list[str]:
+    text = note.abs_path.read_text(encoding="utf-8", errors="replace")
+    return [wikilink_target(item) for item in WIKILINK_RE.findall(source_body_for_hash(text))]
+
+
+def meaningful_inbound_count(target: Note, notes: list[Note]) -> int:
+    target_names = {normalize_name(Path(target.path).stem), normalize_name(target.title)}
+    target_names.update(normalize_name(alias) for alias in target.aliases)
+    target_rel = Path(normalize_relpath(target.path)).with_suffix("").as_posix()
+    count = 0
+    for note in notes:
+        if note.path == target.path:
+            continue
+        links = source_wikilinks(note)
+        matched = False
+        for link in links:
+            if has_path_component(link):
+                if Path(normalize_relpath(link)).with_suffix("").as_posix() == target_rel:
+                    matched = True
+                    break
+            elif normalize_name(link) in target_names:
+                matched = True
+                break
+        if matched:
+            count += 1
+    return count
+
+
+def staleness_report(vault: Path, notes: list[Note], retrieval_180: dict) -> dict:
+    by_path = {item["path"]: item for item in retrieval_180.get("notes") or []}
+    today = today_local()
+    candidates: list[dict] = []
+    for note in sorted(notes, key=lambda item: item.path):
+        if not is_material_note(note):
+            continue
+        if note.path.startswith(("Areas/", "Projects/")) or Path(note.path).name == "README.md":
+            continue
+        modified_at, modified_source = note_last_modified(vault, note)
+        if modified_at is None:
+            continue
+        retrieval_count = int((by_path.get(note.path) or {}).get("retrieval_count", 0))
+        inbound_count = meaningful_inbound_count(note, notes)
+        days_since_modified = (today - modified_at.date()).days
+        status = None
+        if days_since_modified >= 365 and inbound_count == 0 and retrieval_count == 0:
+            status = "stale"
+        elif days_since_modified >= 180 and retrieval_count == 0:
+            status = "dormant"
+        if status is None:
+            continue
+        candidates.append(
+            {
+                "path": note.path,
+                "title": note.title,
+                "status": status,
+                "days_since_modified": days_since_modified,
+                "last_modified": modified_at.strftime("%Y-%m-%d"),
+                "last_modified_source": modified_source,
+                "inbound_count": inbound_count,
+                "retrieval_count_180": retrieval_count,
+                "archive_suggestion": archive_suggestion(note.path),
+            }
+        )
+    counts = Counter(item["status"] for item in candidates)
+    return {
+        "retrieval_window_days": 180,
+        "dormant_threshold_days": 180,
+        "stale_threshold_days": 365,
+        "candidates": candidates,
+        "counts": {key: int(value) for key, value in sorted(counts.items())},
+    }
+
+
+def synthesis_block_span(text: str) -> tuple[int, int] | None:
+    begin = text.find(SYNTHESIS_BEGIN)
+    if begin == -1:
+        return None
+    end = text.find(SYNTHESIS_END, begin)
+    if end == -1:
+        return None
+    return begin, end + len(SYNTHESIS_END)
+
+
+def synthesis_coverage_count(text: str) -> int | None:
+    span = synthesis_block_span(text)
+    if span is None:
+        return None
+    block = text[span[0] : span[1]]
+    match = re.search(r"覆盖材料\s+(\d+)\s+篇", block)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def synthesis_candidates(vault: Path, notes: list[Note]) -> list[dict]:
+    by_topic: dict[str, list[Note]] = defaultdict(list)
+    for note in notes:
+        topic = resource_topic_name(note.path)
+        if topic and is_material_note(note):
+            by_topic[topic].append(note)
+
+    candidates: list[dict] = []
+    for topic, topic_notes in sorted(by_topic.items()):
+        if len(topic_notes) < 5:
+            continue
+        readme = vault / "Resources" / topic / "README.md"
+        if not readme.exists():
+            continue
+        text = readme.read_text(encoding="utf-8", errors="replace")
+        coverage = synthesis_coverage_count(text)
+        if coverage is None:
+            candidates.append(
+                {
+                    "topic": topic,
+                    "topic_dir": f"Resources/{topic}",
+                    "readme": f"Resources/{topic}/README.md",
+                    "material_count": len(topic_notes),
+                    "covered_material_count": 0,
+                    "status": "missing_block",
+                    "reason": "topic has 5+ material notes but no synthesis marker block",
+                    "material_paths": [note.path for note in sorted(topic_notes, key=lambda item: item.path)],
+                }
+            )
+            continue
+        if len(topic_notes) - coverage >= 3:
+            candidates.append(
+                {
+                    "topic": topic,
+                    "topic_dir": f"Resources/{topic}",
+                    "readme": f"Resources/{topic}/README.md",
+                    "material_count": len(topic_notes),
+                    "covered_material_count": coverage,
+                    "status": "stale_coverage",
+                    "reason": "synthesis block covers at least 3 fewer materials than the current topic",
+                    "material_paths": [note.path for note in sorted(topic_notes, key=lambda item: item.path)],
+                }
+            )
+    return candidates
+
+
+def note_reference_date(vault: Path, note: Note) -> date | None:
+    created = parse_iso_date(note.frontmatter.get("created"))
+    if created:
+        return created
+    modified_at, _source = note_last_modified(vault, note)
+    return modified_at.date() if modified_at else None
+
+
+def note_text(note: Note) -> str:
+    return note.abs_path.read_text(encoding="utf-8", errors="replace")
+
+
+def restatement_candidates(vault: Path, notes: list[Note]) -> list[dict]:
+    by_topic: dict[str, list[Note]] = defaultdict(list)
+    for note in notes:
+        topic = resource_topic_name(note.path)
+        if topic and is_material_note(note):
+            by_topic[topic].append(note)
+
+    candidates: list[dict] = []
+    for topic, topic_notes in sorted(by_topic.items()):
+        if len(topic_notes) < 4:
+            continue
+        for note in sorted(topic_notes, key=lambda item: item.path):
+            text = note_text(note)
+            if "## 提炼" not in text:
+                continue
+            last_reconsolidated = None
+            matches = RECONSOLIDATION_RE.findall(text)
+            if matches:
+                last_reconsolidated = parse_iso_date(matches[-1])
+            note_terms = set(top_concepts_from_counts(note_concept_counts(note)))
+            related: list[dict] = []
+            for peer in topic_notes:
+                if peer.path == note.path:
+                    continue
+                if last_reconsolidated is not None:
+                    peer_date = note_reference_date(vault, peer)
+                    if peer_date is None or peer_date <= last_reconsolidated:
+                        continue
+                peer_terms = set(top_concepts_from_counts(note_concept_counts(peer)))
+                shared = sorted(note_terms & peer_terms)
+                if len(shared) < 3:
+                    continue
+                related.append({"path": peer.path, "shared_concepts": shared[:5]})
+            if len(related) < 3:
+                continue
+            concept_counter: Counter[str] = Counter()
+            for item in related:
+                concept_counter.update(item["shared_concepts"])
+            candidates.append(
+                {
+                    "path": note.path,
+                    "topic_dir": f"Resources/{topic}",
+                    "last_reconsolidated": last_reconsolidated.isoformat() if last_reconsolidated else None,
+                    "related_paths": [item["path"] for item in related],
+                    "shared_concepts": [term for term, _count in concept_counter.most_common(5)],
+                    "new_related_count": len(related),
+                    "reason": "same-topic materials add 3+ stable shared concepts after the last distillation checkpoint",
+                }
+            )
+    return candidates
+
+
 def coverage(notes: list[Note]) -> dict:
     distribution = Counter(note.path.split("/", 1)[0] for note in notes)
     return {
@@ -2874,6 +3303,23 @@ def insert_frontmatter_fields(text: str, fields: dict[str, str]) -> str:
     if not insert:
         return text
     return "".join(lines[:end] + insert + lines[end:])
+
+
+def upsert_frontmatter_field(text: str, field: str, value: str) -> str:
+    lines = text.splitlines(keepends=True)
+    start, end = find_frontmatter_block(lines)
+    if start is None or end is None:
+        block = ["---\n", f"{field}: {quote_yaml(value)}\n", "---\n", "\n"]
+        return "".join(block + lines)
+    replacement = f"{field}: {quote_yaml(value)}\n"
+    for index in range(start + 1, end):
+        if lines[index].startswith(f"{field}:"):
+            if lines[index] == replacement:
+                return text
+            lines[index] = replacement
+            return "".join(lines)
+    lines.insert(end, replacement)
+    return "".join(lines)
 
 
 def add_duplicate_marker(text: str, canonical_title: str, evidence: list[dict], date: str) -> str:
@@ -3208,6 +3654,27 @@ def apply_metadata(notes: list[Note], report: dict) -> None:
         if new_text != text:
             note.abs_path.write_text(new_text, encoding="utf-8")
             report["applied"]["metadata"].append({"path": note.path, "fields": sorted(fields)})
+
+
+def apply_staleness(vault: Path, report: dict, date_text: str) -> None:
+    applied = report["applied"].setdefault("staleness", [])
+    protected = set(report.get("protected_paths", []))
+    for item in report.get("staleness_report", {}).get("candidates", []):
+        if item.get("status") != "stale":
+            continue
+        path = item["path"]
+        if is_protected(path, protected):
+            append_skipped_once(report, {"type": "protected_staleness", **item})
+            continue
+        note_path = vault / path
+        if not note_path.exists():
+            append_skipped_once(report, {"type": "missing_stale_note", **item})
+            continue
+        text = note_path.read_text(encoding="utf-8")
+        new_text = upsert_frontmatter_field(text, "last_relevance_check", date_text)
+        if new_text != text:
+            note_path.write_text(new_text, encoding="utf-8")
+        applied.append({"path": path, "status": item["status"], "last_relevance_check": date_text})
 
 
 def apply_topic_indexes(vault: Path, report: dict) -> None:
@@ -3823,6 +4290,8 @@ def append_log(vault: Path, report: dict, date: str) -> None:
         f"- 承接刷新：{len(report['applied'].get('ownership_area_profiles', []))}\n"
         f"- 承接重构：{len(report['applied'].get('ownership_structure', []))}\n"
         f"- 承接分化：{len(report['applied'].get('ownership_splits', []))}\n"
+        "- 语义综合：0\n"
+        "- 再巩固：0\n"
         "commit: 无\n"
     )
     old = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
@@ -3853,9 +4322,12 @@ def append_skipped_once(report: dict, item: dict) -> None:
 def build_report(vault: Path, scopes: list[str]) -> dict:
     protected = protected_paths(vault)
     notes, by_name, file_stems, attachment_targets = build_index(vault, scopes, protected)
+    retrieval_90 = retrieval_stats(vault, notes, days=90)
+    retrieval_180 = retrieval_stats(vault, notes, days=180)
+    staleness = staleness_report(vault, notes, retrieval_180)
     safety_notes = structural_safety_notes(vault, scopes, protected, notes)
     empty_stub_findings = empty_stubs(vault, notes, by_name)
-    topic_index_findings = topic_index_gaps(vault, scopes, protected)
+    topic_index_findings = topic_index_gaps(vault, scopes, protected, retrieval_90, staleness)
     understanding_candidates = understanding_link_candidates(notes)
     structure_candidates = structural_reunderstanding_candidates(vault, notes, protected, safety_notes)
     split_decisions = resource_topic_split_decisions(notes)
@@ -3867,10 +4339,16 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
     topic_profiles = topic_understanding_profiles(notes)
     topic_relation_findings = topic_relation_candidates(notes)
     owner_profiles = ownership_understanding_profiles(notes)
+    synthesis = synthesis_candidates(vault, notes)
+    restatement = restatement_candidates(vault, notes)
     report = {
         "scope": scopes,
         "coverage": coverage(notes),
         "protected_paths": sorted(protected),
+        "retrieval_stats": retrieval_90,
+        "staleness_report": staleness,
+        "synthesis_candidates": synthesis,
+        "restatement_candidates": restatement,
         "duplicates": duplicate_groups(notes),
         "broken_links": broken_links(notes, by_name, file_stems, attachment_targets),
         "empty_stubs": empty_stub_findings,
@@ -3909,11 +4387,13 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
             "ownership_area_profiles": [],
             "ownership_structure": [],
             "ownership_splits": [],
+            "staleness": [],
         },
         "report_only": {
             "suspected_duplicates": [],
             "structure_suggestions": [],
             "unmatched_source_files": [],
+            "staleness_report": staleness,
             "topic_index_gaps": topic_index_findings,
             "understanding_profile_gaps": profile_findings,
             "understanding_link_candidates": understanding_candidates,
@@ -3924,6 +4404,8 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
             "ownership_structure_candidates": ownership_structure_findings,
             "ownership_split_candidates": ownership_split_findings,
             "topic_relation_candidates": topic_relation_findings,
+            "synthesis_candidates": synthesis,
+            "restatement_candidates": restatement,
         },
         "skipped_uncertain": [],
         "verification": {},
@@ -3962,6 +4444,10 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
 def refresh_report_findings(vault: Path, report: dict, include_structure: bool = True) -> tuple[list[Note], dict[str, list[Note]], set[str], set[str]]:
     protected = set(report.get("protected_paths", []))
     notes, by_name, file_stems, attachment_targets = build_index(vault, report["scope"], protected)
+    report["retrieval_stats"] = retrieval_stats(vault, notes, days=90)
+    report["staleness_report"] = staleness_report(vault, notes, retrieval_stats(vault, notes, days=180))
+    report["synthesis_candidates"] = synthesis_candidates(vault, notes)
+    report["restatement_candidates"] = restatement_candidates(vault, notes)
     safety_notes = structural_safety_notes(vault, report["scope"], protected, notes)
     report["duplicates"] = duplicate_groups(notes)
     report["broken_links"] = broken_links(notes, by_name, file_stems, attachment_targets)
@@ -3969,7 +4455,13 @@ def refresh_report_findings(vault: Path, report: dict, include_structure: bool =
     report["source_file_anomalies"] = source_file_anomalies(vault, report["scope"], notes, protected)
     report["metadata_missing"] = metadata_missing(notes)
     report["orphan_notes"] = orphan_notes(notes)
-    report["topic_index_gaps"] = topic_index_gaps(vault, report["scope"], protected)
+    report["topic_index_gaps"] = topic_index_gaps(
+        vault,
+        report["scope"],
+        protected,
+        report["retrieval_stats"],
+        report["staleness_report"],
+    )
     report["understanding_profile_gaps"] = understanding_profile_gaps(vault, notes, protected)
     report["invalid_fingerprints"] = invalid_fingerprints(notes)
     report["invalid_frontmatter"] = invalid_frontmatter_list(notes)
@@ -3990,6 +4482,7 @@ def refresh_report_findings(vault: Path, report: dict, include_structure: bool =
             safety_notes,
         )
     report["report_only"]["topic_index_gaps"] = report["topic_index_gaps"]
+    report["report_only"]["staleness_report"] = report["staleness_report"]
     report["report_only"]["understanding_profile_gaps"] = report["understanding_profile_gaps"]
     report["report_only"]["understanding_link_candidates"] = report["understanding"]["link_candidates"]
     report["report_only"]["structure_candidates"] = report["understanding"].get("structure_candidates", [])
@@ -3999,6 +4492,8 @@ def refresh_report_findings(vault: Path, report: dict, include_structure: bool =
     report["report_only"]["ownership_structure_candidates"] = report["understanding"]["ownership_structure_candidates"]
     report["report_only"]["ownership_split_candidates"] = report["understanding"]["ownership_split_candidates"]
     report["report_only"]["topic_relation_candidates"] = report["understanding"]["topic_relation_candidates"]
+    report["report_only"]["synthesis_candidates"] = report["synthesis_candidates"]
+    report["report_only"]["restatement_candidates"] = report["restatement_candidates"]
     for item in report["broken_links"]:
         if item["status"] != "unique":
             skipped = {"type": "ambiguous_broken_link", **item}
@@ -4387,7 +4882,7 @@ def safe_self_check(vault: Path, report: dict) -> None:
 def checked_report_path(raw: str, expected: Path, label: str) -> Path:
     out = Path(raw).resolve()
     if out != expected:
-        raise ValueError(f"{label} report path must be /tmp/{expected.name}")
+        raise ValueError(f"{label} report path must be {expected}")
     if out.exists() and out.is_symlink():
         raise ValueError(f"{label} report path must not be a symlink")
     return out
@@ -4395,7 +4890,7 @@ def checked_report_path(raw: str, expected: Path, label: str) -> Path:
 
 def write_report_file(path: Path, content: str) -> None:
     if path.parent != FIXED_REPORT_DIR:
-        raise ValueError("report parent must be /tmp")
+        raise ValueError(f"report parent must be {FIXED_REPORT_DIR}")
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
@@ -4469,6 +4964,9 @@ def main(argv: list[str]) -> int:
             after = len(report["applied"].get("structural_moves", []))
             if after == before:
                 break
+        progress(args.progress, "apply staleness")
+        apply_staleness(vault, report, date)
+        notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report)
         progress(args.progress, "apply topic indexes")
         apply_topic_indexes(vault, report)
         notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report)

@@ -21,78 +21,39 @@ Usage:
 """
 from __future__ import annotations
 import argparse
-import re
+import importlib.util
+import sys
 from pathlib import Path
 
 BEGIN_MARKER = "<!-- BEGIN: resource-index -->"
 END_MARKER = "<!-- END: resource-index -->"
 
-FM_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
-KV_RE = re.compile(r"^([A-Za-z_][\w-]*)\s*:\s*(.*)$", re.MULTILINE)
+
+def load_sibling_module(module_name: str, filename: str):
+    module_path = Path(__file__).resolve().with_name(filename)
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {filename}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
-def parse_frontmatter(text: str) -> dict[str, str]:
-    m = FM_RE.match(text)
-    if not m:
-        return {}
-    fm: dict[str, str] = {}
-    for km in KV_RE.finditer(m.group(1)):
-        key = km.group(1)
-        raw = km.group(2).strip()
-        # Strip quotes.
-        if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
-            raw = raw[1:-1]
-        # For multi-line lists, keep only the first item as a simplification; tags etc. are not indexed and are ignored.
-        if key not in fm:
-            fm[key] = raw
-    return fm
+optimize_vault = load_sibling_module("resource_index_optimize_vault", "optimize_vault.py")
 
 
-def strip_quotes(v: str) -> str:
-    if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
-        return v[1:-1]
-    return v
-
-
-def collect_resources(dir_path: Path) -> list[dict]:
-    """Return metadata for type=reference notes under the topic directory, sorted by created desc, filename asc."""
-    items: list[dict] = []
-    for md in sorted(dir_path.glob("*.md")):
-        if md.name.lower() == "readme.md":
-            continue
-        try:
-            text = md.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        fm = parse_frontmatter(text)
-        if fm.get("type", "reference").strip() not in ("reference", ""):
-            continue
-        title = strip_quotes(fm.get("title", "")).strip() or md.stem
-        created = fm.get("created", "").strip()
-        source = strip_quotes(fm.get("source_url", "") or fm.get("source_file", "") or fm.get("source", "")).strip()
-        items.append({"title": title, "file": md.name, "created": created, "source": source})
-    items.sort(key=lambda x: (x["created"], x["file"]), reverse=True)
-    # After created desc, break ties by filename asc via two stable sorts.
-    items.sort(key=lambda x: x["file"])
-    items.sort(key=lambda x: x["created"], reverse=True)
-    return items
+def collect_resources(vault: Path, dir_path: Path) -> list[dict]:
+    """Return resource-index items aligned with meditate-side retrieval and staleness ordering."""
+    notes, _by_name, _file_stems, _attachment_targets = optimize_vault.build_index(vault, ["Resources"], set())
+    retrieval_90 = optimize_vault.retrieval_stats(vault, notes, days=90)
+    retrieval_180 = optimize_vault.retrieval_stats(vault, notes, days=180)
+    staleness = optimize_vault.staleness_report(vault, notes, retrieval_180)
+    return optimize_vault.resource_index_items(dir_path.resolve(), retrieval=retrieval_90, staleness=staleness)
 
 
 def render_index(items: list[dict]) -> str:
-    """Render the pure-Markdown list inside the marker block."""
-    if not items:
-        return f"{BEGIN_MARKER}\n\n> 暂无 reference 类资料。\n\n{END_MARKER}"
-    lines = [BEGIN_MARKER, ""]
-    for it in items:
-        link = f"[[{it['file'][:-3]}]]"  # Drop the .md suffix to form the wikilink.
-        created = it["created"] or "—"
-        if it["source"]:
-            lines.append(f"- {link}（{created}）— {it['source']}")
-        else:
-            lines.append(f"- {link}（{created}）")
-    lines.append("")
-    lines.append(END_MARKER)
-    return "\n".join(lines)
+    return optimize_vault.render_resource_index(items)
 
 
 def find_marker_span(text: str) -> tuple[int, int] | None:
@@ -138,7 +99,12 @@ def process_dir(dir_path: Path, check_only: bool) -> tuple[str, int]:
     """Process one topic directory. Returns (status description, resource count)."""
     if not dir_path.is_dir():
         return f"跳过（非目录）: {dir_path}", 0
-    items = collect_resources(dir_path)
+    vault = Path.cwd().resolve()
+    try:
+        dir_path.resolve().relative_to(vault)
+    except ValueError:
+        return f"跳过（目录不在 vault 内）: {dir_path}", 0
+    items = collect_resources(vault, dir_path)
     readme = dir_path / "README.md"
     if check_only:
         st = check_status(readme, items)

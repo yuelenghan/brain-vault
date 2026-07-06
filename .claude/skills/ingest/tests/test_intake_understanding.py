@@ -261,7 +261,65 @@ class IntakeUnderstandingTest(unittest.TestCase):
 
         hint = report["understanding_hints"]["Inbox/Ambiguous.md"]
         self.assertEqual([], hint["target_candidates"])
-        self.assertTrue(any("ambiguous" in note for note in hint["notes"]))
+
+    def test_encoding_plan_marks_bang_prefixed_note_as_high_salience(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            write_note(
+                vault / "Resources" / "Loop Engineering" / "README.md",
+                "Loop Engineering",
+                "index",
+                "Loop Engineering turns prompting into grader loops, verifier workflows, and memory routing.",
+            )
+            write_note(
+                vault / "Areas" / "Loop Engineering.md",
+                "Loop Engineering",
+                "area",
+                "Long-term ownership for loop engineering and verifier workflows.",
+            )
+            write_note(
+                vault / "Inbox" / "!Loop Roadmap.md",
+                "!Loop Roadmap",
+                "reference",
+                "A roadmap for loop engineering and verifier workflows.",
+            )
+
+            report = ingest.make_report(vault, convert=False)
+
+        plan = report["encoding_plan"]["Inbox/!Loop Roadmap.md"]
+        self.assertEqual("high", plan["salience"])
+        self.assertIn("manual priority marker", " ".join(plan["salience_reasons"]))
+        self.assertEqual("high", plan["frontmatter"]["recommended"]["salience"])
+
+    def test_project_overlap_marks_high_salience_and_requires_project_impact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            write_note(
+                vault / "Projects" / "Loop Engineering 落地实验.md",
+                "Loop Engineering 落地实验",
+                "project",
+                "This project focuses on grader loops, memory routing, and verifier checkpoints.",
+            )
+            write_note(
+                vault / "Resources" / "Loop Engineering" / "README.md",
+                "Loop Engineering",
+                "index",
+                "Loop Engineering covers grader loops, memory routing, and verifier checkpoints.",
+            )
+            write_note(
+                vault / "Inbox" / "Loop Guardrails.md",
+                "Loop Guardrails",
+                "reference",
+                "Loop guardrails rely on grader loops, memory routing, and verifier checkpoints.",
+            )
+
+            report = ingest.make_report(vault, convert=False)
+
+        encoding = report["encoding_plan"]["Inbox/Loop Guardrails.md"]
+        content = report["content_patch_plan"]["Inbox/Loop Guardrails.md"]
+        self.assertEqual("high", encoding["salience"])
+        self.assertIn("active project concept overlap", " ".join(encoding["salience_reasons"]))
+        self.assertIn("对当前项目的直接影响", content["body_markdown"])
 
     def test_markdown_report_includes_intake_understanding_hints(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

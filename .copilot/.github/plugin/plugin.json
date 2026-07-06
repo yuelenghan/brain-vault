@@ -15,6 +15,7 @@
   "skills": [
     "../../skills/setup-brain",
     "../../skills/ingest",
-    "../../skills/meditate"
+    "../../skills/meditate",
+    "../../skills/recall"
   ]
 }

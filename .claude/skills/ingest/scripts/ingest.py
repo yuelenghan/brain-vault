@@ -41,7 +41,7 @@ TEST_REPORT_DIR_ENV = "INGEST_TEST_REPORT_DIR"
 
 def fixed_report_dir() -> Path:
     # Test-only escape hatch so subprocess CLI tests do not race on production /tmp reports.
-    return Path(os.environ.get(TEST_REPORT_DIR_ENV, tempfile.gettempdir())).resolve()
+    return Path(os.environ.get(TEST_REPORT_DIR_ENV) or tempfile.gettempdir()).resolve()
 
 
 FIXED_REPORT_DIR = fixed_report_dir()
@@ -800,12 +800,39 @@ def source_understanding_status(candidate: Candidate, source_text: str) -> dict:
     return base
 
 
-def encoding_plan(vault: Path, candidates: list[Candidate]) -> dict:
+def active_project_overlap(candidate_concepts: Counter[str], index: dict) -> tuple[bool, list[str]]:
+    candidate_terms = set(top_concepts(candidate_concepts, limit=24))
+    for owner in index.get("owners") or []:
+        if not owner.get("path", "").startswith("Projects/"):
+            continue
+        owner_terms = set(top_concepts(owner["concepts"], limit=24))
+        matched = sorted(candidate_terms & owner_terms)
+        if len(matched) >= 2:
+            return True, matched[:5]
+    return False, []
+
+
+def salience_plan(vault: Path, candidate: Candidate, source_text: str, index: dict) -> tuple[str, list[str]]:
+    reasons: list[str] = []
+    if Path(candidate.path).stem.startswith("!"):
+        reasons.append("manual priority marker: filename prefix !")
+    first_non_empty = next((line.strip() for line in source_text.splitlines() if line.strip()), "")
+    if first_non_empty == "#重要":
+        reasons.append("manual priority marker: first content line is #重要")
+    _candidate_text, candidate_concepts = candidate_text(vault, candidate)
+    project_overlap, matched_terms = active_project_overlap(candidate_concepts, index)
+    if project_overlap:
+        reasons.append("active project concept overlap: " + ", ".join(matched_terms))
+    return ("high", reasons) if reasons else ("normal", [])
+
+
+def encoding_plan(vault: Path, candidates: list[Candidate], index: dict) -> dict:
     plans: dict[str, dict] = {}
     for candidate in candidates:
         if candidate.status != "ready" or not candidate.markdown_path:
             continue
         source_text = candidate_source_text(vault, candidate)
+        salience, salience_reasons = salience_plan(vault, candidate, source_text, index)
         source_characters = len(source_text.strip())
         converted = candidate.kind != "markdown"
         distillation_required = converted or source_characters > 3000
@@ -837,6 +864,8 @@ def encoding_plan(vault: Path, candidates: list[Candidate]) -> dict:
             value = frontmatter_string(source_frontmatter, key)
             if value:
                 recommended_frontmatter[key] = value
+        if salience == "high":
+            recommended_frontmatter["salience"] = salience
 
         source_file = {"required": False}
         if converted:
@@ -853,6 +882,8 @@ def encoding_plan(vault: Path, candidates: list[Candidate]) -> dict:
             "title": recommended_frontmatter["title"],
             "source_kind": candidate.kind,
             "source_characters": source_characters,
+            "salience": salience,
+            "salience_reasons": salience_reasons,
             "frontmatter": {
                 "required_fields": ["title", "type", "created", "tags", "source_fingerprint"],
                 "recommended": recommended_frontmatter,
@@ -863,8 +894,8 @@ def encoding_plan(vault: Path, candidates: list[Candidate]) -> dict:
                 "sections": ["## 提炼", "## 原文 / 摘录"] if distillation_required else [],
                 "checks": [
                     "one-sentence judgment",
-                    "3-7 key points",
-                    "Area/Project use and next step",
+                    "5-7 key points" if salience == "high" else "3-5 key points",
+                    "direct impact on current projects" if salience == "high" else "Area/Project use and next step",
                     "keep source evidence under original/excerpt section when distilling",
                 ],
             },
@@ -2470,6 +2501,8 @@ def frontmatter_patch_plan(report: dict) -> dict:
         for key in ("author", "published", "description"):
             if recommended.get(key):
                 fields[key] = recommended[key]
+        if recommended.get("salience"):
+            fields["salience"] = recommended["salience"]
         status_value = "ready" if handoff.get("status") == "ready" else "blocked"
         plans[path] = {
             "status": status_value,
@@ -2502,8 +2535,11 @@ def render_content_body_patch(seed: dict, encoding: dict, visible_source_line: s
     context_dir = use_context.get("topic_dir") or use_context.get("target_dir") or "待定归属"
     ownership = seed.get("ownership") or use_context.get("ownership") or []
     ownership_text = ", ".join(f"`{owner}`" for owner in ownership) if ownership else "无"
+    project_ownership = [owner for owner in ownership if str(owner).startswith("Projects/")]
     wikilinks = safe_wikilink_stems(use_context.get("wikilinks") or [])
     excerpts = seed.get("evidence_excerpts") or []
+    salience = encoding.get("salience") or "normal"
+    excerpt_limit = 7 if salience == "high" else 5
 
     lines = [encoding.get("organize_marker") or "> 整理自 Inbox，<YYYY-MM-DD>"]
     if visible_source_line:
@@ -2517,7 +2553,7 @@ def render_content_body_patch(seed: dict, encoding: dict, visible_source_line: s
     ])
     copied_excerpt = False
     if excerpts:
-        for item in excerpts[:5]:
+        for item in excerpts[:excerpt_limit]:
             text = item.get("text")
             if text:
                 lines.append(f"- {text}")
@@ -2531,6 +2567,12 @@ def render_content_body_patch(seed: dict, encoding: dict, visible_source_line: s
         f"- 归位：`{target}`",
         f"- 承接：{ownership_text}",
     ])
+    if salience == "high":
+        if project_ownership:
+            project_text = "、".join(f"`{owner}`" for owner in project_ownership)
+            lines.append(f"- 对当前项目的直接影响：优先支撑 {project_text} 的下一步决策、执行或复盘。")
+        else:
+            lines.append("- 对当前项目的直接影响：当前尚未解析到明确的 Project 承接，需优先补承接或新建 Area。")
     if wikilinks:
         lines.append("- 连链：" + "、".join(f"[[{link}]]" for link in wikilinks))
     lines.extend([
@@ -2729,7 +2771,7 @@ def make_report(vault: Path, convert: bool, only_paths: set[str] | None = None) 
         "existing_note_count": len(notes),
         "invalid_fingerprints": invalid_fingerprints,
         "duplicates": duplicates,
-        "encoding_plan": encoding_plan(vault, candidates),
+        "encoding_plan": encoding_plan(vault, candidates, knowledge_index),
         "intake_rules": intake_rules,
         "understanding_hints": understanding_hints(vault, candidates, knowledge_index, intake_rules),
         "meditate_feedback": feedback,
@@ -3877,7 +3919,7 @@ def checked_report_path(raw: str, expected: Path, label: str) -> Path:
 
 def write_report_file(path: Path, content: str) -> None:
     if path.parent != FIXED_REPORT_DIR:
-        raise ValueError("report parent must be /tmp")
+        raise ValueError(f"report parent must be {FIXED_REPORT_DIR}")
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
