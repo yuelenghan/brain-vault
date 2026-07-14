@@ -93,7 +93,7 @@ source_file: source/Paper.pdf
             )
 
             notes, by_name, file_stems, attachment_targets = optimize_vault.build_index(vault, ["Resources"], set())
-            findings = optimize_vault.broken_links(notes, by_name, file_stems, attachment_targets)
+            findings = optimize_vault.broken_links(notes, notes, by_name, file_stems, attachment_targets)
 
         self.assertEqual([], findings)
 

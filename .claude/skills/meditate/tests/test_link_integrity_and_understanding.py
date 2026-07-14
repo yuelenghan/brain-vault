@@ -98,6 +98,36 @@ class LinkIntegrityAndUnderstandingTest(unittest.TestCase):
         self.assertEqual("unique", finding["status"])
         self.assertEqual(["Resources/PKM/Foo.md"], finding["matches"])
 
+    def test_scoped_scan_does_not_flag_valid_bare_wikilink_to_area_outside_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            write_note(vault / "Areas" / "AI Native 转型.md", "AI Native 转型", "area")
+            write_note(
+                vault / "Resources" / "Agent Platforms" / "Ref.md",
+                "Ref",
+                "reference",
+                "See [[AI Native 转型]].",
+            )
+
+            report = optimize_vault.build_report(vault, ["Resources/Agent Platforms"])
+
+        self.assertEqual([], report["broken_links"])
+
+    def test_scoped_scan_does_not_flag_valid_path_wikilink_to_project_outside_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            write_note(vault / "Projects" / "Orbit.md", "Orbit", "project")
+            write_note(
+                vault / "Resources" / "Agent Platforms" / "Ref.md",
+                "Ref",
+                "reference",
+                "See [[Projects/Orbit]].",
+            )
+
+            report = optimize_vault.build_report(vault, ["Resources/Agent Platforms"])
+
+        self.assertEqual([], report["broken_links"])
+
     def test_apply_empty_stubs_keeps_stub_when_causal_reference_is_protected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp).resolve()
@@ -167,6 +197,51 @@ type: reference
         self.assertIn("[[Obsidian Course]]", area)
         self.assertIn("[[Obsidian Course]]", project)
         self.assertEqual(2, len(report["applied"]["understanding_links"]))
+
+    def test_scoped_scan_reports_ownership_mentions_to_existing_area_outside_scope_as_outside_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            write_note(vault / "Areas" / "AI Native 转型.md", "AI Native 转型", "area")
+            write_note(
+                vault / "Resources" / "Agent Platforms" / "Ref.md",
+                "Ref",
+                "reference",
+                "This platform supports AI Native 转型.",
+            )
+
+            report = optimize_vault.build_report(vault, ["Resources/Agent Platforms"])
+
+        self.assertEqual(1, len(report["understanding"]["link_candidates"]))
+        candidate = report["understanding"]["link_candidates"][0]
+        self.assertEqual("ownership", candidate["kind"])
+        self.assertEqual("outside_scope", candidate["status"])
+        self.assertFalse(candidate["fixable"])
+        self.assertIn("outside the requested scope", candidate["reason"])
+
+    def test_scoped_scan_does_not_create_new_area_when_owner_exists_outside_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            write_note(
+                vault / "Areas" / "AI Native 转型.md",
+                "AI Native 转型",
+                "area",
+                "This area owns AI native adoption, team enablement, and loop engineering practice.",
+            )
+            for filename, title in (
+                ("Adoption Playbook.md", "Adoption Playbook"),
+                ("Team Enablement.md", "Team Enablement"),
+                ("Loop Practice.md", "Loop Practice"),
+            ):
+                write_note(
+                    vault / "Resources" / "AI Engineering" / filename,
+                    title,
+                    "reference",
+                    "AI native adoption, team enablement, and loop engineering practice are the core operating model.",
+                )
+
+            report = optimize_vault.build_report(vault, ["Resources"])
+
+        self.assertEqual([], report["understanding"]["ownership_area_candidates"])
 
     def test_reunderstanding_ignores_footer_only_ownership_mentions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
