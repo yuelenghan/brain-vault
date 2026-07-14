@@ -1,6 +1,6 @@
 ---
 name: recall
-description: Recall from the brain-vault by spreading activation over titles, aliases, concepts, and wikilinks, then log retrieval outcomes back into .claude/recall.log. Triggers: 回忆、recall、问 brain、brain 里有什么、检索笔记、我之前记过什么、查一下笔记.
+description: Recall from the brain-vault by spreading activation over titles, aliases, concepts, and wikilinks, then log retrieval outcomes back into .claude/recall.log. Triggers: 回忆、recall、问 brain、brain 里有什么、检索笔记、我之前记过什么、查一下笔记；以及任何需要参考 vault 已有笔记回答的知识性、方案性、项目相关问题（即使用户没有明说检索）。回答此类问题时必须先走本 skill，不得用裸 Grep/Read 代替。
 ---
 
 # Recall for Codex sessions

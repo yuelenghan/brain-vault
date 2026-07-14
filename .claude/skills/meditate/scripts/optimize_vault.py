@@ -630,33 +630,55 @@ def attachment_link_exists(note_path: str, link: str, attachment_targets: set[st
     return any(candidate in attachment_targets for candidate in candidates)
 
 
-def broken_links(notes: list[Note], by_name: dict[str, list[Note]], file_stems: set[str], attachment_targets: set[str]) -> list[dict]:
+def resolution_index(
+    vault: Path,
+    scopes: list[str],
+    protected: set[str],
+    notes: list[Note] | None = None,
+    by_name: dict[str, list[Note]] | None = None,
+    file_stems: set[str] | None = None,
+    attachment_targets: set[str] | None = None,
+) -> tuple[list[Note], dict[str, list[Note]], set[str], set[str]]:
+    requested = {normalize_relpath(scope).strip("/") for scope in scopes}
+    defaults = {normalize_relpath(scope).strip("/") for scope in DEFAULT_SCOPES}
+    if requested == defaults and notes is not None and by_name is not None and file_stems is not None and attachment_targets is not None:
+        return notes, by_name, file_stems, attachment_targets
+    return build_index(vault, DEFAULT_SCOPES, protected)
+
+
+def broken_links(
+    source_notes: list[Note],
+    resolution_notes: list[Note],
+    resolution_by_name: dict[str, list[Note]],
+    resolution_file_stems: set[str],
+    resolution_attachment_targets: set[str],
+) -> list[dict]:
     """Find wikilinks whose target does not match any existing file's filename stem.
 
     Obsidian resolves [[X]] → X.md by **filename**, not by frontmatter title
     or alias. A wikilink that matches a note's title but not its filename is
     still broken — Obsidian will create a 0-byte stub file when the link is
     clicked. Source-file links such as [[source/Paper.pdf]] are valid when
-    the attachment exists. This function checks real filenames first;
-    title/alias matches are treated as "soft match" findings that need the
-    wikilink text updated to use the actual filename stem.
+    the attachment exists. This function resolves targets against the whole
+    vault, but only reports findings for the current source workset so scoped
+    runs keep their write boundary.
     """
     findings: list[dict] = []
-    note_paths = {normalize_relpath(note.path) for note in notes}
-    for note in notes:
+    note_paths = {normalize_relpath(note.path) for note in resolution_notes}
+    for note in source_notes:
         for link in sorted(set(note.wikilinks)):
-            if attachment_link_exists(note.path, link, attachment_targets):
+            if attachment_link_exists(note.path, link, resolution_attachment_targets):
                 continue
             target = wikilink_target(link)
             key = normalize_name(target)
             if has_path_component(target):
                 if any(candidate in note_paths for candidate in markdown_link_path_candidates(target)):
                     continue  # Valid: path-qualified wikilink resolves to an existing Markdown file
-            elif key in file_stems:
+            elif key in resolution_file_stems:
                 continue  # Valid: bare wikilink resolves by filename stem
             # No file stem matches — the wikilink is broken in Obsidian
             # Check for soft matches via title/alias (notes that SHOULD be the target)
-            soft_matches = [m.path for m in by_name.get(key, [])]
+            soft_matches = [m.path for m in resolution_by_name.get(key, [])]
             if soft_matches:
                 # Wikilink matches a note's title/alias but not its filename
                 # → Obsidian will create a stub; fix by changing link to actual filename
@@ -669,7 +691,7 @@ def broken_links(notes: list[Note], by_name: dict[str, list[Note]], file_stems: 
                 })
             else:
                 # No match at all — try loose substring fallback on title
-                loose = [n.path for n in notes if key and key in normalize_name(n.title)]
+                loose = [n.path for n in resolution_notes if key and key in normalize_name(n.title)]
                 finding = {"source": note.path, "link": link, "matches": sorted(set(loose))}
                 finding["status"] = "unique" if len(set(loose)) == 1 else "ambiguous"
                 findings.append(finding)
@@ -1231,8 +1253,14 @@ def existing_ownership_match_for_topic(topic: str, concepts: list[str], notes: l
     }
 
 
-def ownership_area_candidates(vault: Path, notes: list[Note], protected: set[str]) -> list[dict]:
+def ownership_area_candidates(
+    vault: Path,
+    notes: list[Note],
+    protected: set[str],
+    resolution_notes: list[Note] | None = None,
+) -> list[dict]:
     profiles = resource_topic_profiles(notes)
+    resolution_notes = resolution_notes or notes
     candidates: list[dict] = []
     for profile in sorted(profiles.values(), key=lambda item: item.dir):
         if profile.material_count < MIN_OWNERSHIP_AREA_MATERIALS:
@@ -1240,7 +1268,7 @@ def ownership_area_candidates(vault: Path, notes: list[Note], protected: set[str
         concepts = stable_topic_concepts(notes, profile.topic)
         if len(concepts) < MIN_OWNERSHIP_AREA_CONCEPTS:
             continue
-        existing_owner = existing_ownership_match_for_topic(profile.topic, concepts, notes)
+        existing_owner = existing_ownership_match_for_topic(profile.topic, concepts, resolution_notes)
         if existing_owner is not None:
             continue
         material_notes = [note.path for note in resource_topic_material_notes(notes, profile.topic)]
@@ -2205,10 +2233,15 @@ def same_topic_peer_link_candidates(notes: list[Note], existing_candidates: list
     return candidates
 
 
-def understanding_link_candidates(notes: list[Note]) -> list[dict]:
+def understanding_link_candidates(
+    notes: list[Note],
+    resolution_notes: list[Note] | None = None,
+) -> list[dict]:
     candidates: list[dict] = []
-    targets = sorted((note for note in notes if is_understanding_target(note)), key=lambda note: note.path)
-    owner_profiles = ownership_profiles(notes)
+    resolution_notes = resolution_notes or notes
+    scope_note_paths = {note.path for note in notes}
+    targets = sorted((note for note in resolution_notes if is_understanding_target(note)), key=lambda note: note.path)
+    owner_profiles = ownership_profiles(resolution_notes)
     owner_frequency = ownership_concept_frequency(owner_profiles)
     for source in sorted(notes, key=lambda note: note.path):
         if not is_material_note(source):
@@ -2227,7 +2260,27 @@ def understanding_link_candidates(notes: list[Note]) -> list[dict]:
             if not matched_name:
                 continue
             kind = "ownership" if is_ownership_note(target) else "explicit_entity"
-            fixable = not source.protected and (kind != "ownership" or not target.protected)
+            target_in_scope = target.path in scope_note_paths
+            if kind == "ownership":
+                fixable = not source.protected and not target.protected and target_in_scope
+                status = "fixable" if fixable else ("outside_scope" if not target_in_scope else "protected")
+                reason = (
+                    f"body mentions `{matched_name}`"
+                    if fixable
+                    else (
+                        f"body mentions `{matched_name}` but ownership target is outside the requested scope"
+                        if not target_in_scope
+                        else f"body mentions `{matched_name}` but source or ownership target has pre-existing uncommitted changes"
+                    )
+                )
+            else:
+                fixable = not source.protected
+                status = "fixable" if fixable else "protected"
+                reason = (
+                    f"body mentions `{matched_name}`"
+                    if fixable
+                    else f"body mentions `{matched_name}` but source note has pre-existing uncommitted changes"
+                )
             candidates.append(
                 {
                     "source": source.path,
@@ -2237,7 +2290,8 @@ def understanding_link_candidates(notes: list[Note]) -> list[dict]:
                     "matched": matched_name,
                     "kind": kind,
                     "fixable": fixable,
-                    "reason": f"body mentions `{matched_name}`",
+                    "status": status,
+                    "reason": reason,
                 }
             )
             source_count += 1
@@ -2261,7 +2315,8 @@ def understanding_link_candidates(notes: list[Note]) -> list[dict]:
         if len(tied) > 1:
             continue
         target = owner_profiles[best_owner_path].note
-        fixable = not source.protected and not target.protected
+        target_in_scope = target.path in scope_note_paths
+        fixable = not source.protected and not target.protected and target_in_scope
         candidates.append(
             {
                 "source": source.path,
@@ -2271,7 +2326,16 @@ def understanding_link_candidates(notes: list[Note]) -> list[dict]:
                 "matched": matched,
                 "kind": "ownership_concept",
                 "fixable": fixable,
-                "reason": f"concept profile overlaps: {', '.join(matched)}",
+                "status": "fixable" if fixable else ("outside_scope" if not target_in_scope else "protected"),
+                "reason": (
+                    f"concept profile overlaps: {', '.join(matched)}"
+                    if fixable
+                    else (
+                        f"concept profile overlaps: {', '.join(matched)} but ownership target is outside the requested scope"
+                        if not target_in_scope
+                        else f"concept profile overlaps: {', '.join(matched)} but source or ownership target has pre-existing uncommitted changes"
+                    )
+                ),
             }
         )
     candidates.extend(same_topic_peer_link_candidates(notes, candidates))
@@ -3480,10 +3544,12 @@ def apply_understanding_links(vault: Path, report: dict) -> None:
         source = by_path.get(item["source"])
         target = by_path.get(item["target"])
         if source is None or target is None:
-            report["skipped_uncertain"].append({"type": "understanding_missing_note", **item})
+            skipped_type = "understanding_outside_scope" if item.get("status") == "outside_scope" else "understanding_missing_note"
+            report["skipped_uncertain"].append({"type": skipped_type, **item})
             continue
         if not item.get("fixable"):
-            report["skipped_uncertain"].append({"type": "protected_understanding_link", **item})
+            skipped_type = "understanding_outside_scope" if item.get("status") == "outside_scope" else "protected_understanding_link"
+            report["skipped_uncertain"].append({"type": skipped_type, **item})
             continue
 
         source_text = source.abs_path.read_text(encoding="utf-8")
@@ -4322,17 +4388,26 @@ def append_skipped_once(report: dict, item: dict) -> None:
 def build_report(vault: Path, scopes: list[str]) -> dict:
     protected = protected_paths(vault)
     notes, by_name, file_stems, attachment_targets = build_index(vault, scopes, protected)
+    resolution_notes, resolution_by_name, resolution_file_stems, resolution_attachment_targets = resolution_index(
+        vault,
+        scopes,
+        protected,
+        notes,
+        by_name,
+        file_stems,
+        attachment_targets,
+    )
     retrieval_90 = retrieval_stats(vault, notes, days=90)
     retrieval_180 = retrieval_stats(vault, notes, days=180)
     staleness = staleness_report(vault, notes, retrieval_180)
     safety_notes = structural_safety_notes(vault, scopes, protected, notes)
     empty_stub_findings = empty_stubs(vault, notes, by_name)
     topic_index_findings = topic_index_gaps(vault, scopes, protected, retrieval_90, staleness)
-    understanding_candidates = understanding_link_candidates(notes)
+    understanding_candidates = understanding_link_candidates(notes, resolution_notes)
     structure_candidates = structural_reunderstanding_candidates(vault, notes, protected, safety_notes)
     split_decisions = resource_topic_split_decisions(notes)
     profile_findings = understanding_profile_gaps(vault, notes, protected)
-    ownership_area_findings = ownership_area_candidates(vault, notes, protected)
+    ownership_area_findings = ownership_area_candidates(vault, notes, protected, resolution_notes)
     ownership_area_profile_findings = ownership_area_profile_gaps(vault, notes, protected)
     ownership_structure_findings = ownership_structure_candidates(vault, notes, protected)
     ownership_split_findings = ownership_split_candidates(vault, notes, protected)
@@ -4350,7 +4425,13 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
         "synthesis_candidates": synthesis,
         "restatement_candidates": restatement,
         "duplicates": duplicate_groups(notes),
-        "broken_links": broken_links(notes, by_name, file_stems, attachment_targets),
+        "broken_links": broken_links(
+            notes,
+            resolution_notes,
+            resolution_by_name,
+            resolution_file_stems,
+            resolution_attachment_targets,
+        ),
         "empty_stubs": empty_stub_findings,
         "source_file_anomalies": source_file_anomalies(vault, scopes, notes, protected),
         "metadata_missing": metadata_missing(notes),
@@ -4444,13 +4525,28 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
 def refresh_report_findings(vault: Path, report: dict, include_structure: bool = True) -> tuple[list[Note], dict[str, list[Note]], set[str], set[str]]:
     protected = set(report.get("protected_paths", []))
     notes, by_name, file_stems, attachment_targets = build_index(vault, report["scope"], protected)
+    resolution_notes, resolution_by_name, resolution_file_stems, resolution_attachment_targets = resolution_index(
+        vault,
+        report["scope"],
+        protected,
+        notes,
+        by_name,
+        file_stems,
+        attachment_targets,
+    )
     report["retrieval_stats"] = retrieval_stats(vault, notes, days=90)
     report["staleness_report"] = staleness_report(vault, notes, retrieval_stats(vault, notes, days=180))
     report["synthesis_candidates"] = synthesis_candidates(vault, notes)
     report["restatement_candidates"] = restatement_candidates(vault, notes)
     safety_notes = structural_safety_notes(vault, report["scope"], protected, notes)
     report["duplicates"] = duplicate_groups(notes)
-    report["broken_links"] = broken_links(notes, by_name, file_stems, attachment_targets)
+    report["broken_links"] = broken_links(
+        notes,
+        resolution_notes,
+        resolution_by_name,
+        resolution_file_stems,
+        resolution_attachment_targets,
+    )
     report["empty_stubs"] = empty_stubs(vault, notes, by_name)
     report["source_file_anomalies"] = source_file_anomalies(vault, report["scope"], notes, protected)
     report["metadata_missing"] = metadata_missing(notes)
@@ -4465,9 +4561,9 @@ def refresh_report_findings(vault: Path, report: dict, include_structure: bool =
     report["understanding_profile_gaps"] = understanding_profile_gaps(vault, notes, protected)
     report["invalid_fingerprints"] = invalid_fingerprints(notes)
     report["invalid_frontmatter"] = invalid_frontmatter_list(notes)
-    report["understanding"]["link_candidates"] = understanding_link_candidates(notes)
+    report["understanding"]["link_candidates"] = understanding_link_candidates(notes, resolution_notes)
     report["understanding"]["resource_topic_split_decisions"] = resource_topic_split_decisions(notes)
-    report["understanding"]["ownership_area_candidates"] = ownership_area_candidates(vault, notes, protected)
+    report["understanding"]["ownership_area_candidates"] = ownership_area_candidates(vault, notes, protected, resolution_notes)
     report["understanding"]["ownership_area_profile_gaps"] = ownership_area_profile_gaps(vault, notes, protected)
     report["understanding"]["ownership_structure_candidates"] = ownership_structure_candidates(vault, notes, protected)
     report["understanding"]["ownership_split_candidates"] = ownership_split_candidates(vault, notes, protected)
@@ -4635,7 +4731,7 @@ def markdown_report(report: dict) -> str:
         for item in understanding_applied
     ]
     understanding_candidate_lines = [
-        f"- `{item['source']}` → `[[{item['target_stem']}]]`（{item['kind']}；{item['reason']}）"
+        f"- `{item['source']}` → `[[{item['target_stem']}]]`（{item['kind']}；{item.get('status', 'report_only')}；{item['reason']}）"
         for item in report.get("understanding", {}).get("link_candidates", [])
         if (item["source"], item["target"]) not in understanding_applied_pairs
     ]
@@ -4854,7 +4950,22 @@ def safe_self_check(vault: Path, report: dict) -> None:
             report.get("scope", DEFAULT_SCOPES),
             protected,
         )
-        for item in broken_links(notes, by_name, file_stems, attachment_targets):
+        resolution_notes, resolution_by_name, resolution_file_stems, resolution_attachment_targets = resolution_index(
+            vault,
+            report.get("scope", DEFAULT_SCOPES),
+            protected,
+            notes,
+            by_name,
+            file_stems,
+            attachment_targets,
+        )
+        for item in broken_links(
+            notes,
+            resolution_notes,
+            resolution_by_name,
+            resolution_file_stems,
+            resolution_attachment_targets,
+        ):
             link_paths = set(markdown_link_path_candidates(item["link"]))
             if structural_old_paths & link_paths:
                 residual_broken_links.append(item)
