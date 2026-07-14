@@ -2,6 +2,8 @@
 
 This repository is a personal knowledge vault template. Follow these rules when working in it with any AI coding agent, including Codex CLI, Copilot CLI, or Claude Code.
 
+When an agent needs the user's long-term identity, goals, current projects, or collaboration preferences, treat `CLAUDE.md` as the shared identity layer and read `## 我是谁`, `## 今年的目标`, `## 协作偏好`, and `## 当前项目` there instead of duplicating that content in `AGENTS.md`.
+
 ## Purpose
 
 brain-vault helps a user collect, organize, optimize, and maintain personal knowledge with PARA + Inbox.
@@ -41,6 +43,7 @@ Cloning the repository does not install optional tools.
 - Codex app/session: project-local entries live in `.agents/skills/ingest` and `.agents/skills/meditate`; they read the matching `.claude/skills/*/SKILL.md` as the canonical workflow.
 - Codex CLI: project-local wrappers live in `.codex/skills/setup-brain`, `.codex/skills/ingest`, `.codex/skills/meditate`, and `.codex/skills/recall`; they read the matching `.claude/skills/*/SKILL.md` as the canonical workflow.
 - Copilot CLI: plugin manifest is `.copilot/.github/plugin/plugin.json`; plugin skills live in `.copilot/skills/setup-brain`, `.copilot/skills/ingest`, `.copilot/skills/meditate`, and `.copilot/skills/recall` and read the matching `.claude/skills/*/SKILL.md` as the canonical workflow.
+- `/setup-brain`: start with a quick initialization for identity, goals, current projects, and either keep or override the existing collaboration preferences; organize-capability setup and auto-organize come afterward only when the user wants them.
 - `/ingest`: organize new materials from `Inbox/` into PARA.
 - `/recall`: retrieve existing organized vault knowledge before answering knowledge, solution, or project-related questions.
 - `/meditate`: optimize existing `Projects/`, `Areas/`, `Resources/`, and `Archive/` notes; do not use it for `Inbox/`.

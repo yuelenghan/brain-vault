@@ -11,6 +11,12 @@ VAULT=${VAULT:-$DEFAULT_VAULT}
 INGEST_TIMEOUT_SECONDS=${INGEST_TIMEOUT_SECONDS:-1800}
 cd "$VAULT" || exit 1
 
+python3 .claude/brain_state.py --vault "$VAULT" --require-setup /ingest
+exit_code=$?
+if (( exit_code != 0 )); then
+  exit "$exit_code"
+fi
+
 DATE=$(date '+%F %H:%M')
 BASELINE_STATUS=$(git status --short -- . ':!Inbox/**' ':!.claude/ingest.log')
 BASELINE_UNSTAGED_DIFF=$(git diff -- . ':!Inbox/**' ':!.claude/ingest.log')

@@ -7,11 +7,12 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
 SCRIPT = Path(".claude/skills/ingest/scripts/ingest.py")
-REPORT_DIR = Path(os.environ.get("INGEST_TEST_REPORT_DIR", "/tmp")).resolve()
+REPORT_DIR = Path(os.environ.get("INGEST_TEST_REPORT_DIR") or tempfile.gettempdir()).resolve()
 JSON_REPORT = str(REPORT_DIR / "ingest.json")
 MARKDOWN_REPORT = str(REPORT_DIR / "ingest.md")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?$")

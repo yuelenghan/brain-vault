@@ -9,6 +9,14 @@ The working directory is the brain-vault root; all paths are relative to the vau
 
 ## Execution checklist
 
+### 0. Require minimal setup-brain initialization first
+
+Before any scan / prepare / apply step, read `CLAUDE.md` first.
+
+- If `CLAUDE.md` is missing, stop and tell the user to run `/setup-brain` first.
+- If the `## 我是谁`, `## 今年的目标`, and `## 当前项目` sections still all contain the template placeholder `待补充。`, stop and tell the user to run `/setup-brain` first.
+- Do not continue to `scan`, `prepare`, `apply-ready`, or `apply-duplicates` until that minimal initialization is complete.
+
 ### 1. Run the deterministic preprocessor first
 
 Prefer letting the script handle Inbox enumeration, type detection, convertible-file conversion, source fingerprinting, exact duplicate checks against the organized library, and duplicate archival, to avoid nondeterminism from model-driven manual sweeps.
@@ -18,8 +26,8 @@ Read-only scan (no conversion, no moves):
 ```bash
 python3 .claude/skills/ingest/scripts/ingest.py \
   --mode scan \
-  --json /tmp/ingest.json \
-  --markdown /tmp/ingest.md
+  --json <tempdir>/ingest.json \
+  --markdown <tempdir>/ingest.md
 ```
 
 Prepare (run safe conversions, still no moves of ordinary material):
@@ -27,8 +35,8 @@ Prepare (run safe conversions, still no moves of ordinary material):
 ```bash
 python3 .claude/skills/ingest/scripts/ingest.py \
   --mode prepare \
-  --json /tmp/ingest.json \
-  --markdown /tmp/ingest.md
+  --json <tempdir>/ingest.json \
+  --markdown <tempdir>/ingest.md
 ```
 
 First-pass apply (move/edit/stage only candidates whose report status is `ready`; default is no commit):
@@ -36,21 +44,21 @@ First-pass apply (move/edit/stage only candidates whose report status is `ready`
 ```bash
 python3 .claude/skills/ingest/scripts/ingest.py \
   --mode apply-ready \
-  --json /tmp/ingest.json \
-  --markdown /tmp/ingest.md \
+  --json <tempdir>/ingest.json \
+  --markdown <tempdir>/ingest.md \
   --date <YYYY-MM-DD> \
   --only "Inbox/<reviewed filename>.md"
 ```
 
-Repeat `--only` for multiple reviewed candidates. Omitting `--only` keeps the compatibility behavior of applying all report-ready candidates, but in interactive ingest work prefer explicit `--only` after reviewing `/tmp/ingest.md` so unreviewed ready candidates stay in Inbox with a logged reason. With `--only`, conversion is also scoped to selected candidates: unselected PDFs/documents/data exports/screenshots/audio stay unconverted in Inbox. To let the script finish the audited first-pass commit and write the real commit hash into `.claude/ingest.log`, add `--commit`. The commit uses only the applied ready candidates' precise pathspec and must leave pre-existing unrelated staged changes staged.
+Repeat `--only` for multiple reviewed candidates. Omitting `--only` keeps the compatibility behavior of applying all report-ready candidates, but in interactive ingest work prefer explicit `--only` after reviewing `<tempdir>/ingest.md` so unreviewed ready candidates stay in Inbox with a logged reason. With `--only`, conversion is also scoped to selected candidates: unselected PDFs/documents/data exports/screenshots/audio stay unconverted in Inbox. To let the script finish the audited first-pass commit and write the real commit hash into `.claude/ingest.log`, add `--commit`. The commit uses only the applied ready candidates' precise pathspec and must leave pre-existing unrelated staged changes staged.
 
 Safe duplicate archival (exact duplicates only):
 
 ```bash
 python3 .claude/skills/ingest/scripts/ingest.py \
   --mode apply-duplicates \
-  --json /tmp/ingest.json \
-  --markdown /tmp/ingest.md \
+  --json <tempdir>/ingest.json \
+  --markdown <tempdir>/ingest.md \
   --date <YYYY-MM-DD>
 ```
 
@@ -58,8 +66,8 @@ In headless / allowlist-restricted environments, use the fixed wrappers instead:
 
 - When the user only asks for analysis, use `scan`.
 - For a normal Inbox organize, run `prepare` first; if the report contains exact duplicates, follow up with `apply-duplicates` for those; after reviewing the ready candidates, use `apply-ready --only "Inbox/<reviewed filename>.md"` to execute only approved first-pass moves/edits/staging. `apply-ready` without `--commit` does not commit; `apply-ready --commit` commits only the applied ready pathspec and appends the resulting `git log -1 --format=%H` hash to `.claude/ingest.log`.
-- The script's JSON / Markdown output is fixed to `/tmp/ingest.json` and `/tmp/ingest.md`; do not pass other report paths, do not pass `--vault`, and run from the vault root.
-- The script's JSON / Markdown output is the source of truth for file types, conversion results, source fingerprints, and exact-duplicate decisions; before continuing, you must Read `/tmp/ingest.md` or the JSON summary.
+- The script's JSON / Markdown output is fixed to `<tempdir>/ingest.json` and `<tempdir>/ingest.md`, where `<tempdir>` is the current OS temp directory (`tempfile.gettempdir()`); do not pass other report paths, do not pass `--vault`, and run from the vault root.
+- The script's JSON / Markdown output is the source of truth for file types, conversion results, source fingerprints, and exact-duplicate decisions; before continuing, you must Read `<tempdir>/ingest.md` or the JSON summary.
 - The report also contains `intake_rules` / `## 摄入学习规则` learned from prior ingest results and meditate feedback, including ownership, topic-routing, and link-attention feedback for future Inbox material; `intake_learning_audit` / `## 摄入学习审计`, which records how many learned rules exist, which actions they cover, and which current Inbox candidates they actually affected; `intake_quality_metrics` / `## 摄入质量指标`, which summarizes ready/blocked counts, handoff readiness, blocker reasons, source-understanding blockers, and learned-rule application counts as the source-side signal for reducing later meditate rework; and `intake_quality_trends` / `## 摄入质量趋势`, which parses prior `.claude/ingest.log` quality metric lines to compare current ready rate with recent runs and surface recurring blockers. It contains `placement_readiness` / `## 归位就绪度` for whether a candidate has a PARA target, ownership path, source understanding, and no target/source-file path conflicts for first-pass placement, plus `encoding_plan` / `## 首次编码计划` for ready candidates: required frontmatter/source fields, source-understanding quality (`source_understanding`, including image placeholder and too-short transcript blockers), `salience` (`high|normal`) with deterministic reasons, whether `## 提炼` and `## 原文 / 摘录` are needed, source-file retention requirements for converted material, and first-pass wikilink policy. It also contains `frontmatter_patch_plan` / `## 元数据写入计划`: target-aware YAML frontmatter to add or replace at line 1, including safe quoting, lifecycle `status` only when appropriate, `source_file` for converted material, the script-generated `source_fingerprint`, and persisted `salience: high` when applicable; `link_verification_plan` / `## 双链验证计划`: every proposed wikilink resolved to an existing Markdown file by actual filename stem, blocking `Inbox/` prefixes, path links, missing targets, and frontmatter-title-only links; and `content_patch_plan` / `## 正文写入计划`: the organize marker, converted-source visible link, first-pass `## 提炼` draft, verified stem-safe wikilinks, `## 原文 / 摘录` retention policy, and for high-salience material an explicit "对当前项目的直接影响" prompt. `understanding_hints` / `## 摄入理解提示` lists likely PARA targets, including `Resources/<topic>/...` topic targets and strong matches to existing `Projects/<project>.md` ownership notes, ownership notes, missing-ownership actions such as creating a new Area, and existing-note wikilinks with deterministic evidence from explicit title/alias mentions, high-confidence same-topic concept overlap, or explicit meditate link-attention feedback. `ownership_update_plan` / `## 承接更新计划` lists Area/Project updates or create-Area templates, using bare target filename-stem backlinks and never `Inbox/` prefixes. `meditate_handoff` / `## meditate 交接清单` summarizes whether first-pass placement, source fingerprint, source understanding, distillation decision, converted-source retention, and verified stem-safe wikilinks are ready enough for meditate to consume after the note is organized. `organization_plan` / `## 首次归位执行计划` lists first-pass operations for ready candidates: Markdown move, converted source move, ownership updates, distillation, wikilinks, resource-index refresh when the target is under `Resources/`, and precise commit scope; blocked candidates list blockers only. `meditate_scope_suggestions` / `## 后续 meditate scope 建议` lists a scoped follow-up meditate command for ready Resource targets plus nearby Resource candidate topics, so re-understanding can focus on changed topics instead of the whole vault. `distillation_seed` / `## 提炼种子` lists key concepts, ownership/topic use context, and auditable source excerpts to help write `## 提炼` without rereading the whole source. In `scan` / `prepare`, these rules/audits/metrics/trends/readiness/plans/hints/handoff/scope/seed checks are report-only; `apply-ready --only` executes selected reviewed candidates whose placement and handoff status are `ready`, optionally commits only those applied paths with `--commit`, and still must not reorganize already-ingested knowledge.
 - If `.claude/ingest.log` exists, the report may learn `prefer_ownership` rules from recent successful `Resources/<topic>` moves and their `[[承接笔记]]`, and may parse prior `- 摄入质量：...` / `- 阻断原因：...` lines into `intake_quality_trends`, but only when the owner still resolves to an existing Area/Project note. If `.claude/meditate.log` exists, the report may include `meditate_feedback` / `## meditate 反馈提醒`: recent structure, ownership, metadata, link, or topic feedback from meditate; ownership feedback may become `ensure_ownership`, structure feedback such as "Resources/A ... 归入 B" may become `prefer_topic` for future Inbox material when the suggested target topic exists, and explicit "补链 A 与 B" feedback may become `prefer_link` only for new Inbox material that mentions both sides and resolves both wikilinks to existing filename stems. Treat the intake rules, intake learning audit, intake quality metrics, intake quality trends, placement readiness, encoding plan, frontmatter patch plan, link verification plan, content patch plan, understanding hints, ownership update plan, meditate handoff checklist, first-pass organization plan, distillation seed, and meditate feedback as source-side intake guidance to reduce future meditate rework, not as permission for `ingest` to optimize already-organized notes.
 - The script only trusts recomputed source-material fingerprints; `source_fingerprint` is the preferred strict field, while legacy `content_fingerprint` is accepted for backward compatibility and is not treated as a strict stale/invalid signal. If the report lists `invalid_fingerprints`, do not auto-dedupe based on those stale frontmatter fingerprints — prefer to report or clean them manually.

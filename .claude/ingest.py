@@ -10,6 +10,8 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+from brain_state import setup_block_message
+
 
 EXCLUDED_INGEST_PATHS = [".", ":!Inbox/**", ":!.claude/ingest.log"]
 
@@ -192,6 +194,11 @@ def main() -> int:
     except RuntimeError as exc:
         print(f"ingest failed: {exc}", file=sys.stderr)
         return 1
+
+    guard_message = setup_block_message(vault, "/ingest")
+    if guard_message:
+        print(guard_message, file=sys.stderr)
+        return 2
 
     if inbox_is_empty(vault):
         print("Inbox 为空，无需整理")

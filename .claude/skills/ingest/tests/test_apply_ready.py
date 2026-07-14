@@ -1065,7 +1065,7 @@ exit 0
         self.assertIn("apply-ready", text)
         self.assertIn("--only", text)
         self.assertIn("INGEST_TEST_REPORT_DIR", text)
-        self.assertIn('"/tmp"', text)
+        self.assertIn("tempfile.gettempdir", text)
         self.assertIn("ingest.json", text)
         self.assertIn("ingest.md", text)
         repo = MODULE_PATH.resolve().parents[4]

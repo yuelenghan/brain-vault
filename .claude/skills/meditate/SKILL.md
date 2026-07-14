@@ -22,6 +22,14 @@ The working directory is the brain-vault root; all paths are relative to the vau
 
 ## Execution checklist
 
+### 0. Require minimal setup-brain initialization first
+
+Before any meditate scan / apply step, read `CLAUDE.md` first.
+
+- If `CLAUDE.md` is missing, stop and tell the user to run `/setup-brain` first.
+- If the `## 我是谁`, `## 今年的目标`, and `## 当前项目` sections still all contain the template placeholder `待补充。`, stop and tell the user to run `/setup-brain` first.
+- Do not continue to cadence routing, `scan`, `apply-safe`, or `finalize-log` until that minimal initialization is complete.
+
 ### 1. Route cadence requests through the headless entry script
 
 When the user explicitly asks for `nightly` or `weekly` cadence, or clearly asks for the light/deep sleep-cycle run, do not reconstruct that flow with ad-hoc `scan` / `apply-safe` commands. From the vault root, run the existing cadence entrypoint instead:

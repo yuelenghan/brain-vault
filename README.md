@@ -35,11 +35,12 @@ claude
 
 初始化向导会帮助你：
 
-- 填写个人身份、目标、当前项目和协作偏好；
+- 先以“快速初始化”方式填写个人身份、目标、当前项目，并沿用现有协作偏好或按需覆盖；
 - 生成适合你的 `CLAUDE.md`；
 - 检查知识库目录结构；
-- 检测可选本地工具，例如 `markitdown`、`Pillow`、`whisper`、`copilot` 和 `codex`；
-- 在你确认后，引导安装缺失工具。
+- 检测可选本地工具，例如 `markitdown`、`Pillow`、`whisper` 和 `ffmpeg`；
+- 按需确认当前仓库里的 Claude Code、Copilot CLI、Codex CLI 入口是否可用，但不引导安装这些 AI 工具；
+- 仅在你需要时继续配置整理能力和自动整理等可选能力。
 
 > 说明：克隆仓库只会获得模板文件，不会自动安装任何本地工具。
 
@@ -82,13 +83,7 @@ gh copilot -- --help
 .copilot/skills/meditate/SKILL.md
 ```
 
-在支持本地插件源的 Copilot CLI 中，可从 `.copilot/` 安装 plugin；也可以在仓库根目录启动 Copilot 后明确要求使用 `setup-brain`、`ingest`、`recall` 或 `meditate` skill。你也可以运行：
-
-```bash
-copilot init
-```
-
-让 Copilot 根据当前仓库生成或更新自己的指令文件。运行前请注意检查已有文件，避免覆盖你已经定制过的说明。
+在支持本地插件源的 Copilot CLI 中，可从 `.copilot/` 使用这些项目内 plugin 文件；也可以在仓库根目录启动 Copilot 后明确要求使用 `setup-brain`、`ingest`、`recall` 或 `meditate` skill。模板会保留这些入口说明，但不会在 `/setup-brain` 中引导安装 Copilot CLI。
 
 ### OpenAI Codex CLI
 
@@ -96,14 +91,6 @@ copilot init
 
 ```bash
 codex
-```
-
-Codex CLI 可通过以下方式安装：
-
-```bash
-npm install -g @openai/codex
-# 或
-brew install --cask codex
 ```
 
 本仓库提供 `AGENTS.md` 作为通用 agent 指令文件，供 Codex CLI 和其他支持仓库指令的工具参考；同时提供项目内 Codex skills：
@@ -141,6 +128,8 @@ AGENTS.md   # 通用 agent 指令
 /ingest
 ```
 
+如果 vault 还没完成最小 `/setup-brain` 初始化（`CLAUDE.md` 中 `我是谁`、`今年的目标`、`当前项目` 仍是 `待补充。` 占位），`/ingest` 会先停下来提示你运行 `/setup-brain`；离线整理入口 `ingest.sh` / `ingest.ps1` / `meditate.sh` 同样会拒绝继续。
+
 整理时会先运行确定性预处理脚本，枚举 Inbox 文件、转换可支持格式、生成来源指纹并识别完全重复；随后会：
 
 - 按 PARA 规则分流到 `Projects/`、`Areas/`、`Resources/` 或 `Archive/`；
@@ -170,7 +159,7 @@ Copilot CLI、Codex 会话和 Codex CLI 也有项目内 skill 入口；这些入
 
 ## 可选工具
 
-brain-vault 的基础功能不依赖额外工具。文档转换、截图占位、音视频转录和其他 AI CLI 需要你按需安装本机命令。
+brain-vault 的基础功能不依赖额外工具。文档转换、截图占位、音视频转录需要你按需安装本机命令；Claude Code、Copilot CLI、Codex CLI 则作为已存在的使用入口被支持，但本模板不负责引导安装它们。
 
 ### 纯 Markdown 整理
 
@@ -216,13 +205,6 @@ brain-vault 的基础功能不依赖额外工具。文档转换、截图占位�
 - Windows PowerShell: `.\.claude\bin\safe-whisper.cmd "Inbox/<file>"`
 
 Whisper 首次运行可能下载模型，耗时和占用空间取决于安装方式和模型选择；可通过 `WHISPER_MODEL` 指定模型，例如在当前 Whisper CLI 默认模型不是你想要的模型时显式选择 `turbo`。
-
-### 其他 AI CLI
-
-- `copilot`：GitHub Copilot CLI。
-- `codex`：OpenAI Codex CLI。
-
-这些工具不会随仓库自动安装；`/setup-brain` 只会检测并在你确认后给出安装引导。
 
 ## 离线入口
 
@@ -275,13 +257,14 @@ Windows PowerShell：
 - `/meditate` 已整理笔记优化技能；
 - `ingest`、`recall` 和 `meditate` 的确定性辅助脚本与本地日志约定；
 - `ingest.sh` / `ingest.ps1` 以及 `meditate.sh` 的 headless 入口；
+- `.claude/brain_state.py` 最小初始化守卫，未完成 `/setup-brain` 时阻止整理与冥想入口继续；
 - Codex 会话 `.agents` skills 和 Codex CLI 项目内 skills；
 - 隐藏目录 `.copilot/` 内的 Copilot CLI plugin manifest 和 skills。
 
 本仓库不包含：
 
 - 你的个人笔记；
-- `markitdown`、`Pillow`、`whisper`、`copilot`、`codex` 等本机工具的安装结果；
+- `markitdown`、`Pillow`、`whisper`、`ffmpeg` 等本机工具的安装结果；
 - Claude Code、Copilot CLI 或 Codex CLI 的本地设置、日志、登录状态和定时任务；
 - Obsidian workspace 等本地状态。
 
@@ -320,11 +303,12 @@ Inside Claude Code, run:
 
 The setup wizard helps you to:
 
-- Fill in your personal identity, goals, current projects, and collaboration preferences;
+- Start with a quick initialization for your identity, goals, current projects, and either keep or override the existing collaboration preferences;
 - Generate a `CLAUDE.md` tailored to you;
 - Check the knowledge-base directory structure;
-- Detect optional local tools such as `markitdown`, `Pillow`, `whisper`, `copilot`, and `codex`;
-- Guide installation of missing tools after your confirmation.
+- Detect optional local tools such as `markitdown`, `Pillow`, `whisper`, and `ffmpeg`;
+- Optionally confirm whether the Claude Code, Copilot CLI, and Codex CLI entry points in this repository are already usable, without guiding installation of those AI tools;
+- Continue with optional organize-capability setup or auto-organize only when you want it.
 
 > Note: Cloning the repository only gives you the template files; it does not install any local tools automatically.
 
@@ -367,13 +351,7 @@ This repository provides `.github/copilot-instructions.md`, from which Copilot c
 .copilot/skills/meditate/SKILL.md
 ```
 
-In Copilot CLI versions that support local plugin sources, you can install the plugin from `.copilot/`; you can also start Copilot from the repository root and explicitly ask it to use the `setup-brain`, `ingest`, `recall`, or `meditate` skill. You can also run:
-
-```bash
-copilot init
-```
-
-to let Copilot generate or update its own instruction file for the current repository. Check existing files before running it, to avoid overwriting instructions you have customized.
+In Copilot CLI versions that support local plugin sources, you can use the project-local plugin files under `.copilot/`; you can also start Copilot from the repository root and explicitly ask it to use the `setup-brain`, `ingest`, `recall`, or `meditate` skill. The template keeps these entry points documented, but `/setup-brain` does not guide installation of Copilot CLI.
 
 ### OpenAI Codex CLI
 
@@ -381,14 +359,6 @@ If you use Codex CLI, run it from the repository root:
 
 ```bash
 codex
-```
-
-Codex CLI can be installed via:
-
-```bash
-npm install -g @openai/codex
-# or
-brew install --cask codex
 ```
 
 This repository provides `AGENTS.md` as a general agent instruction file for Codex CLI and other tools that support repository instructions; it also provides project-internal Codex skills:
@@ -426,6 +396,8 @@ Put material into `Inbox/`, then run in Claude Code:
 /ingest
 ```
 
+If the vault has not finished the minimal `/setup-brain` initialization (the `## 我是谁`, `## 今年的目标`, and `## 当前项目` sections in `CLAUDE.md` still contain the `待补充。` placeholder), `/ingest` stops first and asks you to run `/setup-brain`; the offline entry points `ingest.sh` / `ingest.ps1` / `meditate.sh` refuse to continue for the same reason.
+
 Organizing first runs a deterministic preprocessing script that enumerates Inbox files, converts supported formats, generates source fingerprints, and detects exact duplicates; then it will:
 
 - Route items to `Projects/`, `Areas/`, `Resources/`, or `Archive/` by PARA rules;
@@ -455,7 +427,7 @@ Copilot CLI, Codex sessions, and Codex CLI also have project-internal skill entr
 
 ## Optional Tools
 
-The core features of brain-vault do not depend on extra tools. Document conversion, screenshot placeholders, audio/video transcription, and other AI CLIs require you to install local commands as needed.
+The core features of brain-vault do not depend on extra tools. Document conversion, screenshot placeholders, and audio/video transcription require local commands that you install as needed; Claude Code, Copilot CLI, and Codex CLI are supported as existing entry points, but this template does not guide their installation.
 
 ### Pure Markdown Organizing
 
@@ -501,13 +473,6 @@ During organizing, a safe wrapper is invoked:
 - Windows PowerShell: `.\.claude\bin\safe-whisper.cmd "Inbox/<file>"`
 
 Whisper may download a model on first run; the time and disk usage depend on the install method and model choice. You can specify a model via `WHISPER_MODEL`, for example to explicitly select `turbo` when the current Whisper CLI default model is not what you want.
-
-### Other AI CLIs
-
-- `copilot`: GitHub Copilot CLI.
-- `codex`: OpenAI Codex CLI.
-
-These tools are not installed automatically with the repository; `/setup-brain` only detects them and provides installation guidance after your confirmation.
 
 ## Offline Entry Points
 
@@ -560,12 +525,13 @@ This repository includes:
 - The `/meditate` skill for optimizing organized notes;
 - Deterministic helper scripts and local-log conventions for `ingest`, `recall`, and `meditate`;
 - `ingest.sh` / `ingest.ps1` plus `meditate.sh` headless entry points;
+- `.claude/brain_state.py`, a minimal-initialization guard that blocks organizing and meditate entry points until `/setup-brain` is done;
 - Codex session `.agents` skills and project-internal Codex CLI skills;
 - A Copilot CLI plugin manifest and skills inside the hidden `.copilot/` directory.
 
 This repository does not include:
 
 - Your personal notes;
-- Installations of local tools such as `markitdown`, `Pillow`, `whisper`, `copilot`, or `codex`;
+- Installations of local tools such as `markitdown`, `Pillow`, `whisper`, or `ffmpeg`;
 - Local settings, logs, login state, and scheduled tasks of Claude Code, Copilot CLI, or Codex CLI;
 - Local state such as Obsidian workspace.

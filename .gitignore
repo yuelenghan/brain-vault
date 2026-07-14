@@ -5,10 +5,15 @@
 
 # Generated skill/eval workspaces never belong in runtime entry roots.
 .skill-workspaces/
+.claude/skills/*-workspace/
+.agents/skills/*-workspace/
+.codex/skills/*-workspace/
+.copilot/skills/*-workspace/
 
 # Tool runtime roots are deny-by-default. Only durable entry files and canonical
 # skill directories are whitelisted below.
 .claude/*
+!.claude/brain_state.py
 !.claude/ingest.sh
 !.claude/meditate.sh
 !.claude/ingest.py

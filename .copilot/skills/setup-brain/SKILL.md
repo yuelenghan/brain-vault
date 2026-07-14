@@ -1,6 +1,6 @@
 ---
 name: setup-brain
-description: 初始化 brain-vault：采访用户身份和目标，生成 CLAUDE.md / AGENTS.md，检查 PARA 目录、git 状态、本机转换工具（markitdown、Pillow、whisper、ffmpeg）和 AI CLI（copilot、codex），并按用户确认安装缺失工具。
+description: 初始化 brain-vault：按 canonical setup-brain 流程初始化共享身份层（以 `CLAUDE.md` 为准），并检查 PARA 目录、本机整理工具（markitdown、Pillow、whisper、ffmpeg）以及现有 AI CLI 入口。
 ---
 
 # Setup Brain for Copilot CLI

@@ -29,6 +29,7 @@ IGNORED_GENERATED_PATHS = (
     ".skill-workspaces/agents/meditate-workspace/output.txt",
 )
 WHITELISTED_RUNTIME_PATHS = (
+    ".claude/brain_state.py",
     ".claude/ingest.sh",
     ".claude/meditate.sh",
     ".claude/bin/safe-markitdown",
@@ -100,6 +101,15 @@ class RuntimeEntryLayoutTest(unittest.TestCase):
         self.assertIn(".claude/meditate.sh nightly", text)
         self.assertIn(".claude/meditate.sh weekly", text)
         self.assertIn("When the user explicitly asks for `nightly` or `weekly` cadence", text)
+
+    def test_canonical_ingest_and_meditate_skills_require_setup_brain_first(self) -> None:
+        ingest_text = (VAULT_ROOT / ".claude" / "skills" / "ingest" / "SKILL.md").read_text(encoding="utf-8")
+        meditate_text = (VAULT_ROOT / ".claude" / "skills" / "meditate" / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("run `/setup-brain` first", ingest_text)
+        self.assertIn("run `/setup-brain` first", meditate_text)
+        self.assertIn("待补充。", ingest_text)
+        self.assertIn("待补充。", meditate_text)
 
     def test_canonical_recall_skill_uses_claude_script_paths(self) -> None:
         text = (VAULT_ROOT / ".claude" / "skills" / "recall" / "SKILL.md").read_text(encoding="utf-8")
@@ -176,6 +186,13 @@ class RuntimeEntryLayoutTest(unittest.TestCase):
         )
 
         self.assertEqual(0, result.returncode, msg=result.stderr)
+
+    def test_headless_ingest_and_meditate_entry_scripts_call_brain_state_guard(self) -> None:
+        ingest_text = (VAULT_ROOT / ".claude" / "ingest.sh").read_text(encoding="utf-8")
+        meditate_text = (VAULT_ROOT / ".claude" / "meditate.sh").read_text(encoding="utf-8")
+
+        self.assertIn("python3 .claude/brain_state.py --vault \"$VAULT\" --require-setup /ingest", ingest_text)
+        self.assertIn("python3 .claude/brain_state.py --vault \"$VAULT\" --require-setup /meditate", meditate_text)
 
     def test_weekly_prompt_does_not_use_backticks_for_literal_text(self) -> None:
         text = (VAULT_ROOT / ".claude" / "meditate.sh").read_text(encoding="utf-8")

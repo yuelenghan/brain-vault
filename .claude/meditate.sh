@@ -23,6 +23,12 @@ REPORT_JSON="$REPORT_DIR/meditate.json"
 REPORT_MARKDOWN="$REPORT_DIR/meditate.md"
 cd "$VAULT" || exit 1
 
+python3 .claude/brain_state.py --vault "$VAULT" --require-setup /meditate
+exit_code=$?
+if (( exit_code != 0 )); then
+  exit "$exit_code"
+fi
+
 case "$CADENCE" in
   nightly|weekly) ;;
   *)

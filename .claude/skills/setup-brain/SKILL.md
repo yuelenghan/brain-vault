@@ -1,6 +1,6 @@
 ---
 name: setup-brain
-description: Initialize a brain-vault — interview the user for identity and goals, generate CLAUDE.md, check PARA directories, git status, local conversion tools (markitdown, Pillow, whisper, ffmpeg) and AI CLIs (copilot, codex), and install missing tools on user confirmation. Triggers: setup brain, initialize brain-vault, 初始化 brain-vault, 安装工具.
+description: Initialize or refine this brain-vault — run a pre-check, quickly fill the shared identity layer in `CLAUDE.md` (identity, goals, current projects, and collaboration-preference handling) with AskUserQuestion so Claude Code, Codex, and Copilot can all consume it, then optionally verify local organize tools (markitdown, Pillow, whisper, ffmpeg) and configure organize capabilities. Use this whenever the user says /setup-brain, setup brain, initialize brain-vault, 初始化 brain-vault, 补全身份层, 首次配置这个 vault, or wants to refine this repo's brain-vault setup.
 ---
 
 # Setup Brain
@@ -31,35 +31,116 @@ command -v gh || true
 command -v codex || true
 command -v uv || true
 command -v brew || true
-command -v npm || true
 command -v python3 || true
+command -v python3 >/dev/null && python3 -c "import importlib.util, sys; sys.stdout.write('Pillow\n' if importlib.util.find_spec('PIL') else '')" || true
 ```
+
+Command hits in pre-check only establish detection. Before claiming a tool is ready, verify it with `--help`, an import check, or the relevant validation command from the sections below.
 
 If there are uncommitted changes, do not auto-overwrite the related files; list them as protected paths.
 
+After pre-check, do not dump the raw command output back to the user. Summarize only the few facts that affect the next step:
+
+- whether the current directory is the vault root,
+- whether this is a git repository and whether the worktree is clean,
+- whether the shared identity-layer file still looks like a template or already contains real user content,
+- whether the core PARA directories already exist,
+- whether any protected paths, missing prerequisites, or notable AI CLI detection status will change what happens next.
+
+Keep this handoff short: usually 3-6 bullets plus one transition sentence. Use status words such as `ready`, `template`, `detected`, `missing`, or `protected` so the user can scan quickly. Avoid ending with a long free-text questionnaire such as “please answer these 4 questions”. Instead, give one short recommendation and then immediately open the Stage A `AskUserQuestion` interaction.
+
+A good Chinese handoff looks like this:
+
+```markdown
+基础检查已完成：
+- 当前目录正确，且是 git 仓库。
+- 工作区干净。
+- PARA 目录已存在。
+- `CLAUDE.md` 里的共享身份层仍是模板，适合先做快速初始化。
+- 工具目前仅完成 detected 级检查；是否继续 capability verification 可以稍后再定。
+
+建议先完成共享身份层初始化；下面我会用一轮简短的交互式问题收集信息。
+```
+
 ### 2. Interview the user
 
-Ask for the essential information in one pass to avoid repeated interruptions:
+Prefer a two-stage interview.
 
-1. Who are you? Role, main responsibilities, professional focus?
-2. What are the most important goals for this year or near term?
-3. What are the active projects? One sentence per project.
-4. How do you want Claude to collaborate? For example, preference for concise conclusions, detailed reasoning, autonomous execution, cautious confirmation, etc.
-5. Which file formats do you plan to organize? Should document/data/web/Notebook conversion (Word/PDF/PPT/Excel/TXT/CSV/JSON/HTML/EPUB/IPYNB → Markdown) and screenshot-placeholder capability (image → Markdown placeholder) be enabled?
-6. Should audio/video transcription (audio/video → Markdown) be enabled? If yes, do you accept downloading the Whisper model on first real transcription, and do you need to specify a model or language?
-7. Do you need Copilot CLI or Codex CLI support?
-8. Do you need offline auto-organize? If yes, do you prefer running `ingest.sh` manually, system crontab/launchd, or in-session Claude Code scheduling?
+#### Stage A: quick initialization (recommended)
 
-If the user only wants a quick initialization, conservative defaults are acceptable: keep existing collaboration preferences, create empty PARA directories, and only detect tools without installing.
+Use one `AskUserQuestion` call with 4 questions so the user can answer in a single interactive panel and switch between questions. Prefer suggestion-style options over forcing the user to compose everything from scratch. Adapt labels, descriptions, and previews to the user's language.
 
-### 3. Generate or update CLAUDE.md
+Unless the user already provided equivalent information, Stage A should cover exactly these 4 slots and put the recommended option first with `(Recommended)`:
 
-Update these sections from the user's answers:
+1. `身份` — choose a summary style such as `单一角色`, `多重角色`, or `转型中`.
+2. `目标` — choose a goal structure such as `三项目标`, `按主题`, or `按里程碑`.
+3. `项目` — choose a project layout such as `简短列表`, `按优先级`, or `按领域`.
+4. `偏好` — choose whether to `保留现有`, `轻微调整`, or `完全替换` the existing collaboration preferences.
+
+Use `preview` for the first 3 questions when comparing answer shapes; the collaboration-preference question usually does not need a preview. Explain that the built-in `Other` path can be used for custom input when none of the suggestions fit.
+
+For the exact default Stage A payload and copy-ready option wording, read `references/interactive-prompts.md` before drafting the interaction.
+
+If the user is not working in Chinese, localize the wording but keep the same structure, recommendation order, and preview intent.
+
+After the interactive answers return, ask only for the missing concrete text needed to fill `## 我是谁`, `## 今年的目标`, and `## 当前项目`. Keep this follow-up short and structured, and match the template to the formats the user selected. For example:
+
+```markdown
+请按下面模板补充即可：
+- 我是谁：我是一名……，主要负责……，当前重点是……
+- 今年的目标：
+  - ……
+  - ……
+  - ……
+- 当前项目：
+  1. 项目 A：……
+  2. 项目 B：……
+```
+
+If the user chose `轻微调整` or `完全替换`, add `- 协作偏好：……` to the same follow-up instead of opening a fresh broad interview.
+
+Recommend this path first. Explain that organize capability choices, AI CLI verification, and automation can be configured afterward if needed.
+
+If the user only wants a quick initialization, conservative defaults are acceptable: keep existing collaboration preferences, create empty PARA directories, and only detect tools without installing. Do not pull Stage B questions into the first round unless the user explicitly asks to continue capability setup.
+
+#### Stage B: optional capability details
+
+Only ask follow-up questions when the user explicitly wants to customize capabilities after Stage A, or when a later decision depends on them. Prefer `AskUserQuestion` here as well because these are mostly bounded choices. Keep each call within the tool limit of 1-4 questions; if needed, use a second short call instead of a large free-text prompt.
+
+Scope discipline matters in Stage B:
+
+- If the user only wants one Stage B slot, ask only that slot; do not reconstruct the full Stage B checklist.
+- If the user already said some slots should be skipped, deferred, or handled later, confirm that in one short line and do not reopen those slots in the same turn.
+- If the user is asking for the *shape of the next question* rather than asking you to actually continue the whole setup, answer with the exact next bounded question you would send, not a broader recap of unrelated setup work.
+- Do not drag shared-identity-layer collection back into a Stage B-only turn unless the user explicitly asked to resume Stage A or you are actually about to update `CLAUDE.md`.
+
+Stage B should usually cover these 3 slots, and if the user only wants a subset, trim the payload rather than asking irrelevant questions:
+
+1. `格式` — choose among `文档+图片 (Recommended)`, `仅文档`, `仅图片`, or `暂不启用`.
+2. `转录` — choose among `暂不启用 (Recommended)`, `启用默认`, `稍后再配`, or `现在指定`.
+3. `自动化` — choose among `手动运行 (Recommended)`, `会话内定时`, `系统定时`, or `以后再说`.
+
+For the exact default Stage B payload and canonical option wording, read `references/interactive-prompts.md` before drafting the interaction.
+
+Only ask for free-text details after a Stage B choice actually requires them. For example, ask for Whisper model/language only after `现在指定`.
+
+When the user narrows Stage B to a single slot, keep the answer equally narrow:
+
+- `格式` only → ask only the `格式` question and stop there.
+- `转录` only + `现在指定` → first acknowledge that `格式` / `自动化` stay skipped or deferred, then ask only for `Whisper model` and `language`.
+- In that transcription-only branch, do **not** re-ask whether the user accepts first-download behavior if they already said they want to specify the values now; save the reminder for the final output or the moment before a real transcription.
+- In that transcription-only branch, do **not** pull `我是谁` / `目标` / `项目` back into the turn unless the user explicitly switched back to identity initialization.
+
+### 3. Generate or update the shared identity layer
+
+Update these sections in `CLAUDE.md` from the user's answers:
 
 - `## 我是谁`
 - `## 今年的目标`
 - `## 协作偏好`
 - `## 当前项目`
+
+Treat `CLAUDE.md` as the canonical shared identity layer for this vault. Claude Code reads it directly; Codex and Copilot should be guided to the same sections through `AGENTS.md` and `.github/copilot-instructions.md` rather than maintaining duplicated identity text in multiple files.
 
 Keep the Vault conventions, common commands, tool tiers, and project-level pitfalls below those sections. Do not write temporary task state, one-off information, or credentials.
 
@@ -98,7 +179,7 @@ Preserve empty directories with `.gitkeep`.
 
 The personal vault maintains the same multi-AI entry structure as the open-source projections: `.claude/` is canonical and owns scripts/wrappers, `.agents/` is the Codex session copy, `.codex/` is the Codex CLI thin entry, and `.copilot/` plus `.github/copilot-instructions.md` are the Copilot CLI / GitHub Copilot entries. Do not maintain `.Codex/` as a runtime directory unless a target host explicitly requires that legacy casing.
 
-### 5. Tool detection and install guidance
+### 5. Tool detection and limited CLI verification
 
 #### Basic detection
 
@@ -107,14 +188,15 @@ The personal vault maintains the same multi-AI entry structure as the open-sourc
 - `whisper`: converts `.mp3/.m4a/.wav/.mp4/.mov/.aac/.aiff/.flac/.ogg/.opus/.webm` to Markdown.
 - `ffmpeg`: local dependency required by Whisper to decode audio/video.
 - Whisper model: the first real transcription may download the default model; verify the current default model and `--model` parameter with `whisper --help`, and specify via `WHISPER_MODEL` if needed.
-- `copilot` / `gh copilot`: for the GitHub Copilot CLI.
-- `codex`: for the OpenAI Codex CLI.
-- `uv`, `brew`, `npm`, `python3`: used to decide the recommended install path.
+- `copilot` / `gh copilot`: for the GitHub Copilot CLI entry.
+- `codex`: for the OpenAI Codex CLI entry.
+- `uv`, `brew`, `python3`: used to decide the recommended install path.
 
 #### Install principles
 
 - Cloning the repository does not install any tool.
-- Detection only needs no confirmation; confirm before running any install command.
+- Detection and read-only verification need no confirmation; confirm before running any install command.
+- For AI CLI support in this template, focus on detecting and verifying existing commands, not on guiding installation.
 - Prefer giving commands and letting the user decide whether to run them.
 - Do not guess package names or parameters; before installing, verify the command against `--help` or official/local docs of an existing tool. When verification is impossible, state the uncertainty and let the user install manually.
 
@@ -135,6 +217,14 @@ If the user enables document conversion and `markitdown` is missing:
    command -v markitdown
    markitdown --help
    ```
+
+If the user wants to confirm which AI CLI entries in this repo are already usable, do read-only verification only:
+
+1. If `copilot` is available, run `copilot --help` to verify the command works.
+2. If `gh` is available, run `gh copilot --help` to verify the GitHub CLI entry is present.
+3. If `codex` is available, run `codex --help` to verify the command works. If the command exists but fails to start, report that clearly as detected-but-not-usable instead of turning setup into an installation guide.
+4. Do not ask a dedicated Stage B AI CLI question. Only surface this verification when the user explicitly asks, or as a short factual note in the pre-check / final summary.
+5. Explain the repo entry points factually when relevant: `.claude/` is canonical, `.agents/` is the Codex app/session copy, `.codex/` is the Codex CLI thin entry, and `.copilot/` plus `.github/copilot-instructions.md` are the Copilot CLI / GitHub Copilot entries.
 
 If the user enables audio transcription:
 
@@ -170,31 +260,6 @@ If the user enables audio transcription:
 
 `whisper --help` shows the current default model and the `--model` parameter; if the default is not the model the user wants, suggest running organize with `WHISPER_MODEL=<model>`. Whisper models can be large and the first real transcription may download one; do not silently trigger a model download at setup time — remind the user before a real transcription.
 
-If the user enables Copilot CLI support:
-
-1. If `copilot` is available, run `copilot --help` to verify it works.
-2. If there is no `copilot` but `gh` is available, run `gh copilot --help` to verify GitHub CLI support; you may suggest the user start with `gh copilot` or download the Copilot CLI.
-3. Confirm before login, download, update, or modifying Copilot config.
-4. Explain that `.github/copilot-instructions.md` is this vault's GitHub Copilot repo instruction file, and `.copilot/.github/plugin/plugin.json` plus `.copilot/skills/*/SKILL.md` are in-project Copilot CLI plugin skills. Before running `copilot init`, check whether it would overwrite existing customizations.
-
-If the user enables Codex CLI support:
-
-1. If `codex` is available, run `codex --help` to verify it works; if the command exists but reports a missing binary or fails to start, suggest the user reinstall or repair it.
-2. If there is no `codex` but `npm` is available, suggest:
-
-   ```bash
-   npm install -g @openai/codex
-   ```
-
-3. If `brew` is available, suggest:
-
-   ```bash
-   brew install --cask codex
-   ```
-
-4. Confirm before installing, logging in, or configuring an API key.
-5. Explain that `AGENTS.md` is the generic agent instructions file, `.agents/skills/*/SKILL.md` are this personal vault's Codex session skills, and `.codex/skills/*/SKILL.md` are Codex CLI thin entry skills that read the canonical `.claude/skills/*/SKILL.md`.
-
 ### 6. Wrapper check
 
 Confirm the following files exist and are executable:
@@ -212,6 +277,7 @@ test -x .claude/bin/ingest-apply-duplicates
 test -x .claude/bin/meditate-scan
 test -x .claude/bin/meditate-apply-safe
 test -x .claude/bin/meditate-finalize-log
+test -x .claude/ingest.sh
 test -x .claude/meditate.sh
 ```
 
@@ -232,11 +298,11 @@ python3 -m json.tool .copilot/.github/plugin/plugin.json >/tmp/brain-vault-plugi
 
 ### 7. Optional auto-organize
 
-If the user wants auto-organize, explain the three options. The default recommendation is now **ingest + meditate rhythm**: run `ingest` first, then `meditate` after it. Nightly cadence = `ingest.sh` then `meditate.sh nightly`; weekly cadence = `ingest.sh` then `meditate.sh weekly`.
+Treat this as an after-initialization option, not a first-round requirement. If the user wants auto-organize after the identity layer is initialized, explain the three options. The default recommendation is now **ingest + meditate rhythm**: run `ingest` first, then `meditate` after it. Nightly cadence = `ingest.sh` then `meditate.sh nightly`; weekly cadence = `ingest.sh` then `meditate.sh weekly`.
 
 - In-session: use a Claude Code scheduled task to trigger `/ingest` and `/meditate`; closing the session or task expiry affects execution.
-- System-level: use crontab/launchd to run `VAULT=/path/to/brain .claude/ingest.sh` and then `VAULT=/path/to/brain .claude/meditate.sh nightly`, plus a weekly `VAULT=/path/to/brain .claude/meditate.sh weekly`.
-- Manual: periodically run `/ingest`, `/meditate`, `.claude/ingest.sh`, or `.claude/meditate.sh [nightly|weekly]`.
+- System-level: use crontab/launchd to run `VAULT=/path/to/brain .claude/ingest.sh` and then `VAULT=/path/to/brain .claude/meditate.sh nightly`, plus a weekly `VAULT=/path/to/brain .claude/meditate.sh weekly`. On Windows, prefer Task Scheduler with the PowerShell ingest entry plus the same meditate shell entry through a compatible shell.
+- Manual: periodically run `/ingest`, `/meditate`, `.claude/ingest.sh`, `.claude/ingest.ps1`, or `.claude/meditate.sh [nightly|weekly]`.
 
 Confirm before modifying the system crontab/launchd.
 
@@ -248,9 +314,11 @@ Run:
 git status --short
 ```
 
-Keep the output concise:
+Keep the output concise and organized around outcomes the user can act on:
 
-- Initialized identity-layer sections.
-- Tool status: `markitdown` installed/missing, `whisper` installed/missing, `ffmpeg` installed/missing, Whisper default model/model-download reminder, `copilot` installed/missing, `codex` installed/missing.
-- Enabled capabilities: Markdown organizing, document/data/web/Notebook conversion, screenshot placeholder, audio/video transcription, brain recall/retrieval logging, organized-note meditation/optimization, nightly/weekly meditate automation, Claude Code instructions/skills, Codex session `.agents` skills, Codex CLI `.codex` skills, Copilot CLI `.copilot` skills, and GitHub Copilot `.github/copilot-instructions.md`.
+- Shared identity layer initialized: which sections in `CLAUDE.md` were updated.
+- Multi-client alignment: Codex / Copilot entry files now point to the same shared identity layer.
+- Capability status: document conversion, screenshot placeholder, audio/video transcription, and AI CLI verification status.
+- Use status words such as `detected`, `verified usable`, `missing`, or `deferred` so command detection is not confused with readiness.
+- Reminders: Whisper default model / model-download reminder when transcription is enabled or requested.
 - Next steps: put material into `Inbox/` and run `/ingest`; run `/recall` when you want to query existing knowledge; run `/meditate` or `.claude/meditate.sh [nightly|weekly]` when you want consolidation or a health check on already-organized notes.
