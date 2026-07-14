@@ -1,5 +1,7 @@
 .DS_Store
 .obsidian/
+/tests/
+/.pytest_cache/
 
 # Generated skill/eval workspaces never belong in runtime entry roots.
 .skill-workspaces/
