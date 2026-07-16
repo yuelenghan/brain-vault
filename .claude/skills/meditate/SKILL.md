@@ -30,9 +30,9 @@ Before any meditate scan / apply step, read `CLAUDE.md` first.
 - If the `## 我是谁`, `## 今年的目标`, and `## 当前项目` sections still all contain the template placeholder `待补充。`, stop and tell the user to run `/setup-brain` first.
 - Do not continue to cadence routing, `scan`, `apply-safe`, or `finalize-log` until that minimal initialization is complete.
 
-### 1. Route cadence requests through the headless entry script
+### 1. Route cadence requests by runtime surface
 
-When the user explicitly asks for `nightly` or `weekly` cadence, or clearly asks for the light/deep sleep-cycle run, do not reconstruct that flow with ad-hoc `scan` / `apply-safe` commands. From the vault root, run the existing cadence entrypoint instead:
+Claude Code/headless automation owns the outer `nightly` / `weekly` cadence entrypoint. When an external scheduler, shell, or human operator is launching the sleep-cycle run from outside an active agent session, run the existing cadence entrypoint from the vault root:
 
 ```bash
 .claude/meditate.sh nightly
@@ -40,8 +40,9 @@ When the user explicitly asks for `nightly` or `weekly` cadence, or clearly asks
 ```
 
 - Treat these two commands as part of the meditate skill contract, not as an out-of-band manual-only fallback.
+- In a current Codex / Copilot / already-headless agent session, do not launch `.claude/meditate.sh` again. That would re-enter the same cadence router recursively; use the lower-level deterministic script flow in the next section, or the `.claude/bin/meditate-*` wrappers when running under tool allowlists.
 - After the cadence script finishes, inspect its result (`git status --short`, latest commit when one exists, and `.claude/meditate.log` if needed) and report the outcome using the normal final-output structure below.
-- Use the lower-level deterministic script flow in the next section only for normal interactive meditate runs, analyze-only runs, scoped runs, or when debugging the cadence entry script itself.
+- Use the lower-level deterministic script flow in the next section for normal interactive meditate runs, Codex/Copilot cadence runs, analyze-only runs, scoped runs, or when debugging the cadence entry script itself.
 
 ### 2. Run the deterministic script first
 

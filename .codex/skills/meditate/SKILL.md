@@ -12,7 +12,7 @@ description: 冥想 brain vault 中已整理的 Projects/Areas/Resources/Archive
 1. 先读取 `.claude/skills/meditate/SKILL.md`；它是已整理笔记优化流程的 canonical 规则源。
 2. 严格按该文件执行。若本文件与 `.claude/skills/meditate/SKILL.md` 冲突，以 `.claude/skills/meditate/SKILL.md` 为准。
 3. 若 `.claude/skills/meditate/SKILL.md` 不存在，停止并说明当前仓库缺少 brain-vault Claude Code skill，不能安全优化。
-4. 如果用户明确要求 `nightly` 或 `weekly` cadence，必须从 vault 根目录走 `.claude/meditate.sh nightly` 或 `.claude/meditate.sh weekly`，再按 canonical `.claude` skill 做验证与结果汇报，而不是在本入口里手拼底层 `scan` / `apply-safe` 流程。
+4. 如果用户明确要求 `nightly` 或 `weekly` cadence，且你是当前 Codex agent，不要运行 `.claude/meditate.sh`；它是外层 Claude Code/headless cadence 入口，可能递归拉起另一个 agent。继续按 canonical `.claude` skill 的底层 deterministic script / wrapper 流程执行，再做验证与结果汇报。
 5. 只优化 `Projects/`、`Areas/`、`Resources/`、`Archive/`，不要整理 `Inbox/`。
 6. 优先使用固定报告路径：`/tmp/meditate.json` 和 `/tmp/meditate.md`。不要给优化脚本传其他 report 路径或 `--vault`。
 7. 自动去重只信任规范化 URL、非空重新计算源内容指纹或同一原文附件证据；优先使用并严格校验 `source_fingerprint`，兼容旧 `content_fingerprint` 但不把它当作严格 stale/invalid 信号，也不要基于 frontmatter 中不匹配的旧指纹或空内容指纹自动移动或编辑文件。

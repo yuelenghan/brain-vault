@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -233,6 +234,20 @@ type: index
 
         self.assertIn("- 语义综合：0", text)
         self.assertIn("- 再巩固：0", text)
+
+    def test_append_log_uses_auto_trigger_from_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            git_init(vault)
+            write_note(vault / "Resources" / "PKM" / "README.md", "PKM", "index", "# PKM")
+
+            report = optimize_vault.build_report(vault, ["Resources"])
+            with mock.patch.dict(os.environ, {"MEDITATE_LOG_TRIGGER": "auto"}):
+                optimize_vault.append_log(vault, report, "2026-07-06 11:09")
+
+            text = (vault / ".claude" / "meditate.log").read_text(encoding="utf-8")
+
+        self.assertIn("## 2026-07-06 11:09 auto", text)
 
     def test_apply_safe_marks_stale_notes_and_reorders_resource_index(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

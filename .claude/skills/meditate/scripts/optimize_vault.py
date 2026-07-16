@@ -4335,8 +4335,11 @@ def apply_empty_stubs(vault: Path, report: dict) -> None:
 def append_log(vault: Path, report: dict, date: str) -> None:
     log_path = vault / ".claude" / "meditate.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    trigger = os.environ.get("MEDITATE_LOG_TRIGGER", "manual").strip() or "manual"
+    if trigger not in {"manual", "auto"}:
+        trigger = "manual"
     entry = (
-        f"## {date} manual\n"
+        f"## {date} {trigger}\n"
         f"- 范围：{', '.join(report['scope'])}\n"
         f"- 完全重复：{len(report['duplicates'])}\n"
         f"- 疑似重复：0\n"

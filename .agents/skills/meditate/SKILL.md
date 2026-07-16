@@ -12,7 +12,7 @@ This is the Codex-session entry point for brain-vault meditation. The working di
 1. First read `.claude/skills/meditate/SKILL.md`; it is the canonical workflow for organized-note meditation.
 2. Follow that canonical file strictly. If this file conflicts with `.claude/skills/meditate/SKILL.md`, the `.claude` file wins.
 3. If `.claude/skills/meditate/SKILL.md` does not exist, stop and say the vault is missing the canonical brain-vault meditate skill, so vault meditation cannot be run safely.
-4. If the user explicitly asks for `nightly` or `weekly` cadence, route the run through `.claude/meditate.sh nightly` or `.claude/meditate.sh weekly` from the vault root, then continue following the canonical `.claude` skill for verification and reporting.
+4. If the user explicitly asks for `nightly` or `weekly` cadence in the current Codex agent, do not run `.claude/meditate.sh`; it is the outer Claude Code/headless cadence entrypoint and may recursively launch another agent. Continue with the canonical `.claude` skill's lower-level deterministic script / wrapper flow, then verify and report using the canonical output structure.
 5. Only process `Projects/`, `Areas/`, `Resources/`, and `Archive/`; do not organize `Inbox/`.
 6. Use the canonical fixed report paths: `/tmp/meditate.json` and `/tmp/meditate.md`; do not pass alternate report paths or `--vault`.
 7. Auto-deduplication only trusts normalized URLs, recomputed non-empty `source_fingerprint`, or same-original-file evidence; legacy `content_fingerprint` is compatible but must not be treated as a strict stale/invalid signal.

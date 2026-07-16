@@ -95,12 +95,14 @@ class RuntimeEntryLayoutTest(unittest.TestCase):
         self.assertIn(".claude/skills/meditate/scripts/fix_frontmatter.py", text)
         self.assertNotIn(".agents/skills/meditate/scripts/", text)
 
-    def test_canonical_meditate_skill_routes_cadence_requests_through_headless_entry_script(self) -> None:
+    def test_canonical_meditate_skill_distinguishes_headless_and_agent_cadence(self) -> None:
         text = (VAULT_ROOT / ".claude" / "skills" / "meditate" / "SKILL.md").read_text(encoding="utf-8")
 
         self.assertIn(".claude/meditate.sh nightly", text)
         self.assertIn(".claude/meditate.sh weekly", text)
-        self.assertIn("When the user explicitly asks for `nightly` or `weekly` cadence", text)
+        self.assertIn("Claude Code/headless", text)
+        self.assertIn("Codex", text)
+        self.assertIn("do not launch `.claude/meditate.sh`", text)
 
     def test_canonical_ingest_and_meditate_skills_require_setup_brain_first(self) -> None:
         ingest_text = (VAULT_ROOT / ".claude" / "skills" / "ingest" / "SKILL.md").read_text(encoding="utf-8")
@@ -129,8 +131,9 @@ class RuntimeEntryLayoutTest(unittest.TestCase):
 
         self.assertEqual([], unexpected)
         self.assertIn(".claude/skills/meditate/SKILL.md", text)
-        self.assertIn(".claude/meditate.sh nightly", text)
-        self.assertIn(".claude/meditate.sh weekly", text)
+        self.assertIn("current Codex agent", text)
+        self.assertIn("do not run `.claude/meditate.sh`", text)
+        self.assertNotIn("route the run through `.claude/meditate.sh", text)
         self.assertNotIn(".agents/skills/meditate/scripts/", text)
 
     def test_agents_recall_entrypoint_stays_thin(self) -> None:
@@ -147,15 +150,16 @@ class RuntimeEntryLayoutTest(unittest.TestCase):
         self.assertNotIn(".agents/skills/recall/scripts/", text)
 
     def test_cli_wrappers_delegate_meditate_to_canonical_claude_skill(self) -> None:
-        for wrapper in (
-            VAULT_ROOT / ".codex" / "skills" / "meditate" / "SKILL.md",
-            VAULT_ROOT / ".copilot" / "skills" / "meditate" / "SKILL.md",
-        ):
+        wrappers = {
+            VAULT_ROOT / ".codex" / "skills" / "meditate" / "SKILL.md": "当前 Codex agent",
+            VAULT_ROOT / ".copilot" / "skills" / "meditate" / "SKILL.md": "当前 Copilot agent",
+        }
+        for wrapper, expected_agent in wrappers.items():
             with self.subTest(path=wrapper.relative_to(VAULT_ROOT).as_posix()):
                 text = wrapper.read_text(encoding="utf-8")
                 self.assertIn(".claude/skills/meditate/SKILL.md", text)
-                self.assertIn(".claude/meditate.sh nightly", text)
-                self.assertIn(".claude/meditate.sh weekly", text)
+                self.assertIn(expected_agent, text)
+                self.assertIn("不要运行 `.claude/meditate.sh`", text)
                 self.assertIn("不要整理 `Inbox/`", text)
                 self.assertIn("ingest", text)
 
@@ -206,6 +210,23 @@ class RuntimeEntryLayoutTest(unittest.TestCase):
         self.assertIn(".claude/skills/meditate/scripts/cadence_guard.py", text)
         self.assertIn("weekly-prompt", text)
         self.assertIn("audit-weekly-commit", text)
+
+    def test_headless_cadence_prompt_prevents_recursive_entrypoint_calls(self) -> None:
+        text = (VAULT_ROOT / ".claude" / "meditate.sh").read_text(encoding="utf-8")
+
+        self.assertIn("MEDITATE_CADENCE_ENTRY_ACTIVE", text)
+        self.assertIn("不要再次运行 .claude/meditate.sh", text)
+        self.assertNotIn('"Bash(.claude/meditate.sh', text)
+
+    def test_headless_entry_directly_applies_when_no_deep_candidates(self) -> None:
+        text = (VAULT_ROOT / ".claude" / "meditate.sh").read_text(encoding="utf-8")
+
+        self.assertIn("run_deterministic_apply_commit()", text)
+        self.assertIn("if (( deep_count == 0 )); then", text)
+        self.assertIn('MEDITATE_LOG_TRIGGER=auto .claude/bin/meditate-apply-safe "$DATE" --progress', text)
+        self.assertIn(".claude/bin/safe-git-commit", text)
+        self.assertIn(".claude/bin/meditate-finalize-log", text)
+        self.assertIn("Rename sources are already staged by git mv", text)
 
     def test_meditate_baseline_checks_ignore_obsidian_graph_runtime_state(self) -> None:
         text = (VAULT_ROOT / ".claude" / "meditate.sh").read_text(encoding="utf-8")
