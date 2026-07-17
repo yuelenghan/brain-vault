@@ -475,6 +475,47 @@ class IntakeUnderstandingTest(unittest.TestCase):
         self.assertEqual(["Areas/Loop Engineering.md"], readiness["ownership"])
         self.assertIn("## 归位就绪度", markdown)
 
+    def test_project_owner_target_overrides_tied_resource_topic_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            write_note(
+                vault / "Resources" / "AI Agents" / "README.md",
+                "AI Agents",
+                "index",
+                "Autonomous delivery runtime evidence policy fixture validation.",
+            )
+            write_note(
+                vault / "Resources" / "AI Engineering" / "README.md",
+                "AI Engineering",
+                "index",
+                "Autonomous delivery runtime evidence policy fixture validation.",
+            )
+            write_note(
+                vault / "Projects" / "spec-runner.md",
+                "spec-runner",
+                "project",
+                "spec-runner delivery runtime and issue runner implementation.",
+            )
+            write_note(
+                vault / "Inbox" / "spec-runner Issue Runner Design.md",
+                "spec-runner Issue Runner Design",
+                "design",
+                "spec-runner Issue Runner design covers autonomous delivery runtime evidence policy fixture validation.",
+            )
+
+            report = ingest.make_report(vault, convert=False)
+
+        hint = report["understanding_hints"]["Inbox/spec-runner Issue Runner Design.md"]
+        self.assertEqual(
+            "Projects/spec-runner/spec-runner Issue Runner Design.md",
+            hint["target_candidates"][0]["target"],
+        )
+        readiness = report["placement_readiness"]["Inbox/spec-runner Issue Runner Design.md"]
+        self.assertEqual("ready", readiness["status"])
+        self.assertEqual("Projects/spec-runner/spec-runner Issue Runner Design.md", readiness["target"])
+        self.assertEqual(["Projects/spec-runner.md"], readiness["ownership"])
+        self.assertNotIn("ambiguous target", readiness["reasons"])
+
     def test_placement_readiness_blocks_when_ownership_action_is_required(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp).resolve()

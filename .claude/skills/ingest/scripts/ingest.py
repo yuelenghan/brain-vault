@@ -1439,12 +1439,15 @@ def understanding_hints(vault: Path, candidates: list[Candidate], index: dict, i
                 scored_topics.append((score, topic, evidence, profile))
         scored_topics = apply_topic_preference_rules(scored_topics, text, intake_rules)
         scored_topics.sort(key=lambda item: (-item[0], item[1]))
+        ambiguous_topic_note: str | None = None
+        ambiguous_topic_score: int | None = None
         if scored_topics:
             best_score = scored_topics[0][0]
             tied_best = [item for item in scored_topics if item[0] == best_score]
             if len(tied_best) > 1:
                 names = ", ".join(topic for _score, topic, _evidence, _profile in tied_best)
-                notes.append(f"ambiguous target topic candidates: {names}")
+                ambiguous_topic_note = f"ambiguous target topic candidates: {names}"
+                ambiguous_topic_score = best_score
             else:
                 for score, topic, evidence, _profile in scored_topics[:3]:
                     target_candidates.append({
@@ -1470,6 +1473,25 @@ def understanding_hints(vault: Path, candidates: list[Candidate], index: dict, i
                 "evidence": [*evidence, "matched existing Project owner"],
             })
         target_candidates.sort(key=lambda item: (-item["score"], item["target"]))
+        if ambiguous_topic_note:
+            primary_target = target_candidates[0] if target_candidates else None
+            project_owner_name_matched = bool(primary_target) and any(
+                item.startswith("matched ownership name:")
+                for item in primary_target.get("evidence", [])
+            )
+            project_owner_target_wins = (
+                bool(primary_target)
+                and primary_target.get("scope") == "Projects"
+                and (
+                    primary_target.get("score", 0) > (ambiguous_topic_score or 0)
+                    or project_owner_name_matched
+                )
+            )
+            if project_owner_target_wins:
+                names = ambiguous_topic_note.removeprefix("ambiguous target topic candidates: ")
+                notes.append(f"resource topic candidates tied but Project owner target selected: {names}")
+            else:
+                notes.append(ambiguous_topic_note)
 
         owner_candidates: list[dict] = []
         for owner in index["owners"]:
