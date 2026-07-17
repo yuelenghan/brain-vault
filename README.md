@@ -153,7 +153,26 @@ AGENTS.md   # 通用 agent 指令
 /meditate
 ```
 
-该技能只处理 `Projects/`、`Areas/`、`Resources/` 和 `Archive/`，不会整理 `Inbox/`。如果你想跑 headless 周期化整理，可使用 `.claude/meditate.sh nightly` 或 `.claude/meditate.sh weekly`。
+该技能只处理 `Projects/`、`Areas/`、`Resources/` 和 `Archive/`，不会整理 `Inbox/`。
+
+`meditate` 常见工作模式：
+
+| 模式 | 适用场景 | 行为 |
+| --- | --- | --- |
+| `scan` | 只体检、只报告 | 只生成健康报告，不修改笔记，也不提交。 |
+| `apply-safe` | 默认安全修复 | 处理确定性、低风险、可审计的补链、去重、元数据补全、主题索引和结构修复。 |
+| `--scope <目录>` | 聚焦某个主题或目录 | 只冥想指定目录，例如某个 `Resources/<topic>`。 |
+| `finalize-log` | 提交后收口日志 | 把刚完成提交的真实 commit hash 写入本地 `.claude/meditate.log`。 |
+| `nightly` | 轻量睡眠周期 | 先扫描；没有可处理项就只记日志，有低风险项才执行 `apply-safe`。 |
+| `weekly` | 深度睡眠周期 | 在 `nightly` 的基础上，最多处理 2 个语义综合候选和 3 个再巩固候选，并通过 guard 限制写入范围。 |
+
+也可以把这三个入口对应到大脑行为来理解：
+
+| 入口 | 大脑行为 | 含义 |
+| --- | --- | --- |
+| `/ingest` | 摄入与编码新记忆 | 把 `Inbox/` 里的新材料验货、去重、提炼、归位，并接到 PARA 和相关承接笔记上。 |
+| `/meditate` | 睡眠巩固与重组记忆 | 对已经整理好的知识做体检、补链、去重、修复失效链接、更新主题索引，让知识结构更稳。 |
+| `/recall` | 联想与回忆提取 | 在回答问题前，从已整理知识里按标题、别名、概念和双链激活相关笔记。 |
 
 Copilot CLI、Codex 会话和 Codex CLI 也有项目内 skill 入口；这些入口会读取 `.claude/skills/*/SKILL.md` 作为 canonical 流程源，以保持多种 agent 入口的一致行为。
 
@@ -222,14 +241,57 @@ Windows PowerShell：
 
 离线入口会调用 Claude Code headless 模式，并复用 `/ingest` 的整理规则。需要指定其他 vault 时，设置环境变量 `VAULT`；macOS / Linux 可用 `VAULT=/path/to/brain .claude/ingest.sh`，Windows PowerShell 可用 `$env:VAULT = "C:\path\to\brain"; .\.claude\ingest.ps1`。
 
-已整理笔记的周期化整理可用：
+如果要在支持 `zsh` 的环境里 headless 维护已整理笔记，可运行：
 
 ```bash
 .claude/meditate.sh nightly
+# 或
 .claude/meditate.sh weekly
 ```
 
-`nightly` 会优先处理低风险、确定性的体检和修复；`weekly` 会在同一套确定性基础上增加受约束的深度巩固。
+推荐的自动化节奏是先 `ingest`，再按 nightly 或 weekly cadence 运行 `meditate`。
+
+配置前先手动运行一次 `.claude/ingest.sh` 和 `.claude/meditate.sh nightly`，确认 `claude`、权限、PATH、git 状态和本地日志都正常。
+
+Claude Code 会话内定时任务示例：
+
+```text
+请创建一个会话内定时任务：每天 01:10 在当前 brain-vault 根目录运行 /ingest，
+完成后运行 /meditate nightly。不要修改系统 cron/launchd，不要安装工具、登录外部服务、
+push 或发布内容；如果发现运行前已有无关未提交改动，只报告并跳过受保护路径。
+```
+
+```text
+请创建一个会话内定时任务：每周日 02:30 在当前 brain-vault 根目录运行 /ingest，
+完成后运行 /meditate weekly。不要和 nightly 任务同时运行；weekly 只处理报告中的
+语义综合和再巩固候选，并遵守 meditate guard 的写入范围。
+```
+
+Codex app 自动化示例：
+
+```text
+创建一个 Codex 本地项目自动化：
+名称：brain-vault daily ingest and nightly meditate
+项目：当前 brain-vault 仓库
+频率：每天 01:10
+运行位置：local project
+任务：在仓库根目录先运行 /ingest，再运行 /meditate nightly。只使用仓库内
+.claude/.agents/.codex 提供的入口和 canonical skill；不要直接调用底层 Python 脚本；
+不要 push、发布、安装工具或修改系统定时任务。若有无关未提交改动，保护这些路径并报告。
+```
+
+```text
+创建一个 Codex 本地项目自动化：
+名称：brain-vault weekly deep meditate
+项目：当前 brain-vault 仓库
+频率：每周日 02:30
+运行位置：local project
+任务：在仓库根目录先运行 /ingest，再运行 /meditate weekly。避免与 daily/nightly
+任务重叠；weekly 只能处理 meditate 报告允许的语义综合和再巩固候选，并在结束时报告
+git status、是否产生提交以及本地日志结果。
+```
+
+Claude Code 会话内任务更适合短期或随会话运行的提醒；Codex 自动化适合让 Codex 在后台按计划运行并把结果交回 review。真正无人值守的离线兜底仍可用系统级 `cron` / `launchd` / 任务计划程序调用 `.claude/ingest.sh`、`.claude/ingest.ps1` 或 `.claude/meditate.sh nightly|weekly`，但修改系统定时任务前需要用户明确确认。避免让 `nightly` 和 `weekly` 同时运行，也不要直接定时底层 Python 脚本；定时任务里可按需设置 `CLAUDE_BIN`、`INGEST_TIMEOUT_SECONDS`、`MEDITATE_TIMEOUT_SECONDS` 或 `MEDITATE_MAX_PROTECTED_PATHS`。
 
 ## 安全边界
 
@@ -401,7 +463,7 @@ If the vault has not finished the minimal `/setup-brain` initialization (the `##
 Organizing first runs a deterministic preprocessing script that enumerates Inbox files, converts supported formats, generates source fingerprints, and detects exact duplicates; then it will:
 
 - Route items to `Projects/`, `Areas/`, `Resources/`, or `Archive/` by PARA rules;
-- Create or update承接 notes (intake notes) for content with long-term value;
+- Create or update ownership notes for content with long-term value;
 - Add `[[bidirectional links]]`;
 - Try to protect pre-existing uncommitted changes;
 - Commit only the files related to this organizing run;
@@ -421,7 +483,26 @@ When organized notes need a health check, deduplication, link backfilling, or fi
 /meditate
 ```
 
-This skill only processes `Projects/`, `Areas/`, `Resources/`, and `Archive/`; it does not organize `Inbox/`. For headless maintenance cadences, use `.claude/meditate.sh nightly` or `.claude/meditate.sh weekly`.
+This skill only processes `Projects/`, `Areas/`, `Resources/`, and `Archive/`; it does not organize `Inbox`.
+
+Common `meditate` modes:
+
+| Mode | When to use it | Behavior |
+| --- | --- | --- |
+| `scan` | Health check or report only | Generates a report without changing notes or committing. |
+| `apply-safe` | Default safe repair | Applies deterministic, low-risk, auditable fixes for links, duplicates, metadata, topic indexes, and structure. |
+| `--scope <directory>` | Focus on one topic or directory | Limits meditation to a specific directory, such as one `Resources/<topic>`. |
+| `finalize-log` | Close the log after a commit | Writes the real commit hash from the just-finished commit into local `.claude/meditate.log`. |
+| `nightly` | Light sleep cycle | Scans first; if nothing is actionable it only logs, otherwise it runs `apply-safe`. |
+| `weekly` | Deep sleep cycle | Builds on `nightly`, then handles at most 2 synthesis candidates and 3 restatement candidates with guard-limited writes. |
+
+You can also understand the three entry points as brain-like behaviors:
+
+| Entry point | Brain behavior | Meaning |
+| --- | --- | --- |
+| `/ingest` | Intake and encoding of new memories | Inspect, deduplicate, distill, and place new `Inbox/` material into PARA with ownership notes and links. |
+| `/meditate` | Sleep-cycle consolidation and reorganization | Health-check organized knowledge, backfill links, deduplicate, fix broken links, and refresh topic indexes so the structure stays coherent. |
+| `/recall` | Associative recall and retrieval | Activate relevant organized notes by titles, aliases, concepts, and wikilinks before answering a question. |
 
 Copilot CLI, Codex sessions, and Codex CLI also have project-internal skill entry points; these read `.claude/skills/*/SKILL.md` as the canonical process source, keeping behavior consistent across agent entry points.
 
@@ -490,14 +571,63 @@ Windows PowerShell:
 
 The offline entry point invokes Claude Code in headless mode and reuses the organizing rules of `/ingest`. To target a different vault, set `VAULT`; on macOS / Linux use `VAULT=/path/to/brain .claude/ingest.sh`, and on Windows PowerShell use `$env:VAULT = "C:\path\to\brain"; .\.claude\ingest.ps1`.
 
-For recurring maintenance of already organized notes, use:
+For headless maintenance of already-organized notes in environments with `zsh`, run:
 
 ```bash
 .claude/meditate.sh nightly
+# or
 .claude/meditate.sh weekly
 ```
 
-`nightly` prioritizes low-risk deterministic checks and fixes; `weekly` builds on the same deterministic pass and then allows a tightly bounded deeper consolidation pass.
+The recommended automation rhythm is `ingest` first, then `meditate` on a nightly or weekly cadence.
+
+Before scheduling, run `.claude/ingest.sh` and `.claude/meditate.sh nightly` manually once to verify `claude`, permissions, PATH, git state, and local logs.
+
+Claude Code in-session scheduled task example:
+
+```text
+Create an in-session scheduled task: every day at 01:10, from the current
+brain-vault root, run /ingest and then /meditate nightly. Do not modify system
+cron/launchd, install tools, log in to external services, push, or publish
+content. If unrelated uncommitted changes already exist, protect those paths,
+report them, and skip unsafe edits.
+```
+
+```text
+Create an in-session scheduled task: every Sunday at 02:30, from the current
+brain-vault root, run /ingest and then /meditate weekly. Do not overlap with
+the nightly task; weekly may only process synthesis and restatement candidates
+allowed by the meditate report and guard.
+```
+
+Codex app automation example:
+
+```text
+Create a Codex local project automation:
+Name: brain-vault daily ingest and nightly meditate
+Project: this brain-vault repository
+Frequency: every day at 01:10
+Run location: local project
+Task: from the repository root, run /ingest first, then /meditate nightly. Use
+only the repository-provided .claude/.agents/.codex entry points and canonical
+skills; do not call lower-level Python scripts directly; do not push, publish,
+install tools, or modify system schedulers. If unrelated uncommitted changes
+exist, protect those paths and report them.
+```
+
+```text
+Create a Codex local project automation:
+Name: brain-vault weekly deep meditate
+Project: this brain-vault repository
+Frequency: every Sunday at 02:30
+Run location: local project
+Task: from the repository root, run /ingest first, then /meditate weekly. Avoid
+overlap with daily/nightly jobs; weekly may only process synthesis and
+restatement candidates allowed by the meditate report, and must report git
+status, whether a commit was created, and local log results at the end.
+```
+
+Claude Code in-session tasks are better for short-term or session-bound reminders; Codex automations are better when you want Codex to run in the background on a schedule and return results for review. For true unattended offline fallback, you can still use a system-level scheduler such as `cron`, `launchd`, or Task Scheduler to call `.claude/ingest.sh`, `.claude/ingest.ps1`, or `.claude/meditate.sh nightly|weekly`, but modifying system schedulers requires explicit user confirmation. Avoid running `nightly` and `weekly` at the same time, and do not schedule the lower-level Python scripts directly; scheduled jobs may set `CLAUDE_BIN`, `INGEST_TIMEOUT_SECONDS`, `MEDITATE_TIMEOUT_SECONDS`, or `MEDITATE_MAX_PROTECTED_PATHS` when needed.
 
 ## Security Boundaries
 
