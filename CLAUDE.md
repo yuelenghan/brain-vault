@@ -41,7 +41,7 @@
 
 - 初始化 brain：运行 `/setup-brain`。
 - 手动整理 Inbox：运行 `/ingest`。
-- 检索 / 回忆 brain：运行 `/recall`；显式回忆和任何需要参考已有笔记的问题都先走它；固定报告路径使用当前操作系统 temp 目录，事件写入 `.claude/recall.log`（本地日志，不进 git）。
+- 检索 / 回忆 brain：运行 `/recall`；显式回忆和任何需要参考已有笔记的问题都先走它；query 模式默认写入当前操作系统 temp 目录下的固定报告路径，事件写入 `.claude/recall.log`（本地日志，不进 git）。
 - 优化已整理笔记：运行 `/meditate`。
 - 离线兜底整理：macOS / Linux 在 vault 根目录运行 `.claude/ingest.sh`；Windows PowerShell 运行 `.claude/ingest.ps1`。
 - Copilot CLI：在 vault 根目录运行 `copilot`，并参考 `.github/copilot-instructions.md`。

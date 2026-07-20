@@ -10,5 +10,6 @@ This is the Codex-session entry point for brain-vault recall.
 1. First read `.claude/skills/recall/SKILL.md`; it is the canonical workflow.
 2. Follow that file strictly. If this file conflicts with `.claude/skills/recall/SKILL.md`, the `.claude` file wins.
 3. If `.claude/skills/recall/SKILL.md` does not exist, stop and say the vault is missing the canonical brain-vault recall skill.
-4. Use the canonical fixed report paths under the current OS temp directory: `<tempdir>/recall.json` and `<tempdir>/recall.md`.
+4. In normal query mode, omit `--json` and `--markdown`; the canonical script writes `<tempdir>/recall.json` and `<tempdir>/recall.md` under the current OS temp directory. If explicit paths are needed, compute `<tempdir>` with `python3 -c 'import tempfile; print(tempfile.gettempdir())'`; do not try `/tmp` first.
 5. Run `.claude/skills/recall/scripts/recall.py`, not `.agents/skills/.../scripts/...`.
+6. Do not show tempdir discovery or path-correction chatter to the user unless recall still fails after using the computed fixed paths.

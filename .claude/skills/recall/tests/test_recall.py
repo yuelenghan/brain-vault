@@ -126,6 +126,41 @@ class RecallTest(unittest.TestCase):
         self.assertIn("- 缺口：无", log_text)
         self.assertEqual("loop engineering memory routing", logged_report["query"])
 
+    def test_query_mode_defaults_to_fixed_report_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            report_dir = vault / ".test-reports"
+            report_dir.mkdir(parents=True, exist_ok=True)
+            write_note(
+                vault / "Resources" / "Loop Engineering" / "Loop Engineering Primer.md",
+                "Loop Engineering Primer",
+                "reference",
+                "Loop engineering uses grader loop checkpoints and memory routing.",
+            )
+            old_cwd = Path.cwd()
+            old_report_dir = recall.FIXED_REPORT_DIR
+            old_json_report = recall.FIXED_JSON_REPORT
+            old_markdown_report = recall.FIXED_MARKDOWN_REPORT
+            try:
+                os.chdir(vault)
+                recall.FIXED_REPORT_DIR = report_dir.resolve()
+                recall.FIXED_JSON_REPORT = (report_dir / "recall.json").resolve()
+                recall.FIXED_MARKDOWN_REPORT = (report_dir / "recall.md").resolve()
+
+                rc = recall.main(["--mode", "query", "--query", "loop engineering"])
+            finally:
+                os.chdir(old_cwd)
+                recall.FIXED_REPORT_DIR = old_report_dir
+                recall.FIXED_JSON_REPORT = old_json_report
+                recall.FIXED_MARKDOWN_REPORT = old_markdown_report
+
+            report = json.loads((report_dir / "recall.json").read_text(encoding="utf-8"))
+            markdown = (report_dir / "recall.md").read_text(encoding="utf-8")
+
+        self.assertEqual(0, rc)
+        self.assertEqual("loop engineering", report["query"])
+        self.assertIn("# Recall Report: loop engineering", markdown)
+
     def test_create_gap_note_writes_inbox_note_with_query_and_description(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp).resolve()

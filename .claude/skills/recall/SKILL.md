@@ -14,12 +14,12 @@ Run the local recall script before answering:
 ```bash
 python3 .claude/skills/recall/scripts/recall.py \
   --mode query \
-  --query "<user query>" \
-  --json <tempdir>/recall.json \
-  --markdown <tempdir>/recall.md
+  --query "<user query>"
 ```
 
-- Replace `<tempdir>` with the current OS temp directory (the value of `tempfile.gettempdir()`), and use only the fixed report paths `<tempdir>/recall.json` and `<tempdir>/recall.md`.
+- In normal query mode, omit `--json` and `--markdown`; the script writes the fixed report files under the current OS temp directory.
+- If explicit report paths are needed for debugging, compute the temp directory with `tempfile.gettempdir()` before running the command; do not substitute `/tmp` manually. Use only `<tempdir>/recall.json` and `<tempdir>/recall.md`.
+- Do not narrate tempdir discovery or path correction to the user unless recall still fails after using the computed fixed paths.
 - Do not pass `--vault`; run from the vault root.
 - The script reuses `.claude/skills/meditate/scripts/knowledge_model.py` for concept extraction and spreading-activation style matching. Direct hits accept exact-name mention, query-inside-name partial recall, and adaptive name-token overlap; spread activation uses one hop over both outgoing and incoming wikilinks.
 

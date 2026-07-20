@@ -612,6 +612,9 @@ def main(argv: list[str]) -> int:
     try:
         json_path = checked_report_path(args.json_path, FIXED_JSON_REPORT, "JSON") if args.json_path else None
         markdown_path = checked_report_path(args.markdown_path, FIXED_MARKDOWN_REPORT, "Markdown") if args.markdown_path else None
+        if args.mode == "query":
+            json_path = json_path or checked_report_path(str(FIXED_JSON_REPORT), FIXED_JSON_REPORT, "JSON")
+            markdown_path = markdown_path or checked_report_path(str(FIXED_MARKDOWN_REPORT), FIXED_MARKDOWN_REPORT, "Markdown")
     except ValueError as exc:
         return fail(str(exc))
 
