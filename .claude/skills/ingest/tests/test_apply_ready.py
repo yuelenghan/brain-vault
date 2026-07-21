@@ -1120,6 +1120,35 @@ exit 0
             self.assertIn("- selected_only：`Inbox/Loop Notes.md`", markdown)
             self.assertIn("- skipped_ready_not_selected：`Inbox/Loop Extra.md`", markdown)
 
+    def test_apply_ready_applies_multiple_candidates_sharing_owner_in_one_call(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            self.setup_ready_vault(vault)
+            write_note(
+                vault / "Inbox" / "Loop Extra.md",
+                "Loop Extra",
+                "reference",
+                "Loop Engineering extra notes about maker checker workflows and verifier evidence.",
+            )
+
+            report = ingest.make_report(vault, convert=False)
+            self.assertEqual("ready", report["organization_plan"]["Inbox/Loop Notes.md"]["status"])
+            self.assertEqual("ready", report["organization_plan"]["Inbox/Loop Extra.md"]["status"])
+
+            ingest.apply_ready(vault, report, "2026-07-02")
+
+            self.assertTrue((vault / "Resources" / "Loop Engineering" / "Loop Notes.md").exists())
+            self.assertTrue((vault / "Resources" / "Loop Engineering" / "Loop Extra.md").exists())
+            self.assertFalse((vault / "Inbox" / "Loop Notes.md").exists())
+            self.assertFalse((vault / "Inbox" / "Loop Extra.md").exists())
+            owner = (vault / "Areas" / "Loop Engineering.md").read_text(encoding="utf-8")
+            self.assertIn("[[Loop Notes]]", owner)
+            self.assertIn("[[Loop Extra]]", owner)
+            applied_from = {item["from"] for item in report["applied"]["ready"]}
+            self.assertEqual({"Inbox/Loop Notes.md", "Inbox/Loop Extra.md"}, applied_from)
+            skipped_reasons = {s.get("reason") for s in report["skipped"]}
+            self.assertNotIn("protected paths changed after report", skipped_reasons)
+
 
 if __name__ == "__main__":
     unittest.main()

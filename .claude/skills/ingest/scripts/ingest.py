@@ -3103,6 +3103,7 @@ def validate_only_paths(report: dict, only_paths: set[str]) -> list[str]:
 
 def apply_ready(vault: Path, report: dict, date: str, only_paths: set[str] | None = None) -> None:
     report.setdefault("applied", {}).setdefault("ready", [])
+    baseline_protected = protected_paths(vault)
     audit = report.setdefault("apply_selection_audit", {})
     audit["selected_only"] = sorted(only_paths) if only_paths is not None else []
     audit["applied_ready"] = []
@@ -3135,7 +3136,7 @@ def apply_ready(vault: Path, report: dict, date: str, only_paths: set[str] | Non
             continue
         source_path = vault / markdown_from
         target_path = vault / target
-        protected_scope = protected_apply_scope(plan, protected_paths(vault))
+        protected_scope = protected_apply_scope(plan, baseline_protected)
         if protected_scope:
             report.setdefault("skipped", []).append({
                 "path": path,
