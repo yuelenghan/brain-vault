@@ -161,6 +161,49 @@ class RecallTest(unittest.TestCase):
         self.assertEqual("loop engineering", report["query"])
         self.assertIn("# Recall Report: loop engineering", markdown)
 
+    def test_query_report_exposes_intent_and_entity_roles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            write_note(
+                vault / "Resources" / "Agent Platforms" / "AgentDeck 项目调研报告.md",
+                "AgentDeck 项目调研报告",
+                "reference",
+                "AgentDeck is a managed agents platform for coding workflows.",
+            )
+
+            report = recall.build_query_report(vault, "调研 OpenBMB/StaffDeck，并对比 agentdeck")
+
+        plan = report["query_plan"]
+        self.assertEqual("compare", plan["intent"])
+        self.assertEqual(["openbmb", "staffdeck"], plan["primary_terms"])
+        self.assertEqual(["agentdeck"], plan["comparison_terms"])
+        self.assertEqual(["agentdeck", "openbmb", "staffdeck"], plan["entity_terms"])
+        self.assertIn("agentdeck", plan["terms"])
+
+    def test_markdown_report_includes_query_understanding(self) -> None:
+        report = {
+            "query": "调研 OpenBMB/StaffDeck，并对比 agentdeck",
+            "query_plan": {
+                "intent": "compare",
+                "terms": ["agentdeck", "openbmb", "staffdeck"],
+                "primary_terms": ["openbmb", "staffdeck"],
+                "comparison_terms": ["agentdeck"],
+                "entity_terms": ["agentdeck", "openbmb", "staffdeck"],
+                "concept_terms": [],
+            },
+            "query_concepts": [],
+            "activations": [],
+            "suggested_reading_order_total": 0,
+            "suggested_reading_order": [],
+        }
+
+        markdown = recall.markdown_report(report)
+
+        self.assertIn("## Query Understanding", markdown)
+        self.assertIn("- Intent: compare", markdown)
+        self.assertIn("- Primary Terms: openbmb、staffdeck", markdown)
+        self.assertIn("- Comparison Terms: agentdeck", markdown)
+
     def test_create_gap_note_writes_inbox_note_with_query_and_description(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp).resolve()

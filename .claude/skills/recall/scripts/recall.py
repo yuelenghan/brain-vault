@@ -42,6 +42,26 @@ SINGLE_TOKEN_DIRECT_STOPWORDS = {
     "workflow",
     "workflows",
 }
+COMPARE_MARKERS = (
+    "对比",
+    "比较",
+    "相比",
+    " vs ",
+    " vs. ",
+    " versus ",
+    " compare ",
+    " comparison ",
+    " difference ",
+    " differences ",
+)
+RESEARCH_MARKERS = (
+    "调研",
+    "研究",
+    "分析",
+    "research",
+    "investigate",
+    "survey",
+)
 
 
 def load_cross_skill_module(module_name: str, relative_path: Path):
@@ -72,6 +92,26 @@ class NoteRecord:
     concepts: Counter[str]
     topic: str | None
     ownership: list[str]
+
+
+@dataclass
+class QueryPlan:
+    intent: str
+    terms: list[str]
+    primary_terms: list[str]
+    comparison_terms: list[str]
+    entity_terms: list[str]
+    concept_terms: list[str]
+
+    def to_dict(self) -> dict:
+        return {
+            "intent": self.intent,
+            "terms": self.terms,
+            "primary_terms": self.primary_terms,
+            "comparison_terms": self.comparison_terms,
+            "entity_terms": self.entity_terms,
+            "concept_terms": self.concept_terms,
+        }
 
 
 def fail(message: str) -> int:
@@ -165,6 +205,59 @@ def build_query_terms(query_counts: Counter[str], query_concepts: set[str]) -> s
     } | {term for term in query_concepts if " " in term}
 
 
+def sorted_terms(terms: set[str]) -> list[str]:
+    return sorted(term for term in terms if term)
+
+
+def latin_entity_terms(text: str) -> set[str]:
+    terms: set[str] = set()
+    for raw in re.findall(r"[A-Za-z][A-Za-z0-9-]*", text):
+        token = knowledge_model.normalize_concept_token(raw)
+        if LATIN_TOKEN_RE.fullmatch(token) and len(token) >= 3 and token not in SINGLE_TOKEN_DIRECT_STOPWORDS:
+            terms.add(token)
+    return terms
+
+
+def query_intent(query: str) -> str:
+    padded = f" {query.lower()} "
+    if any(marker in query or marker in padded for marker in COMPARE_MARKERS):
+        return "compare"
+    if any(marker in query or marker in padded for marker in RESEARCH_MARKERS):
+        return "research"
+    return "search"
+
+
+def comparison_suffix(query: str) -> str:
+    lower = query.lower()
+    best_index = -1
+    best_marker = ""
+    for marker in COMPARE_MARKERS:
+        marker_index = lower.rfind(marker.strip().lower())
+        if marker_index > best_index:
+            best_index = marker_index
+            best_marker = marker.strip()
+    if best_index < 0:
+        return ""
+    return query[best_index + len(best_marker) :]
+
+
+def build_query_plan(query: str, query_counts: Counter[str], query_concepts: set[str]) -> QueryPlan:
+    base_terms = build_query_terms(query_counts, query_concepts)
+    entity_terms = latin_entity_terms(query)
+    intent = query_intent(query)
+    comparison_terms = latin_entity_terms(comparison_suffix(query)) if intent == "compare" else set()
+    primary_terms = entity_terms - comparison_terms
+    all_terms = base_terms | entity_terms | query_concepts
+    return QueryPlan(
+        intent=intent,
+        terms=sorted_terms(all_terms),
+        primary_terms=sorted_terms(primary_terms),
+        comparison_terms=sorted_terms(comparison_terms),
+        entity_terms=sorted_terms(entity_terms),
+        concept_terms=sorted_terms(query_concepts),
+    )
+
+
 def query_supports_reverse_match(query: str) -> bool:
     compact = re.sub(r"\s+", "", query)
     latin_len = len(re.sub(r"[^A-Za-z0-9]", "", compact))
@@ -206,6 +299,14 @@ def distinctive_query_name_terms(query_terms: set[str], notes: list[NoteRecord])
         and term not in SINGLE_TOKEN_DIRECT_STOPWORDS
         and 0 < name_term_frequency.get(term, 0) <= 2
     }
+
+
+def query_term_role(terms: set[str], query_plan: QueryPlan) -> str:
+    if terms & set(query_plan.comparison_terms):
+        return "comparison"
+    if terms & set(query_plan.primary_terms):
+        return "primary"
+    return "query"
 
 
 def read_note(vault: Path, path: Path, by_name: dict[str, list[str]] | None = None) -> NoteRecord:
@@ -289,8 +390,9 @@ def build_index(vault: Path) -> tuple[list[NoteRecord], dict[str, list[NoteRecor
     return notes, by_name, by_path, {path: sorted(sources) for path, sources in incoming_by_path.items()}
 
 
-def direct_match_terms(query: str, query_terms: set[str], distinctive_name_terms: set[str], note: NoteRecord) -> list[str]:
+def direct_match_terms(query: str, query_plan: QueryPlan, distinctive_name_terms: set[str], note: NoteRecord) -> list[str]:
     matched: list[str] = []
+    query_terms = set(query_plan.terms)
     threshold = overlap_threshold(query_terms) if query_terms else 1
     reverse_allowed = query_supports_reverse_match(query)
     names = [Path(note.path).stem, note.title, *note.aliases]
@@ -305,12 +407,14 @@ def direct_match_terms(query: str, query_terms: set[str], distinctive_name_terms
             continue
         overlap = sorted(query_terms & tokenize_name(name))
         if len(overlap) >= threshold:
-            matched.append(f"matched title/alias/stem tokens: {name} ({', '.join(overlap[:5])})")
+            role = query_term_role(set(overlap), query_plan)
+            matched.append(f"matched {role} title/alias/stem tokens: {name} ({', '.join(overlap[:5])})")
             continue
         distinctive_overlap = sorted(set(overlap) & distinctive_name_terms)
         first_token = first_latin_name_token(name)
         if distinctive_overlap and first_token in distinctive_overlap:
-            matched.append(f"matched distinctive title/alias/stem token: {name} ({', '.join(distinctive_overlap[:5])})")
+            role = query_term_role(set(distinctive_overlap), query_plan)
+            matched.append(f"matched {role} distinctive title/alias/stem token: {name} ({', '.join(distinctive_overlap[:5])})")
     return list(dict.fromkeys(matched))
 
 
@@ -379,14 +483,15 @@ def build_query_report(vault: Path, query: str) -> dict:
     notes, by_name, by_path, incoming_by_path = build_index(vault)
     query_counts = knowledge_model.concept_counts_for_text(query)
     query_concepts = set(knowledge_model.top_concepts_from_counts(query_counts, limit=24))
-    query_terms = build_query_terms(query_counts, query_concepts)
+    query_plan = build_query_plan(query, query_counts, query_concepts)
+    query_terms = set(query_plan.terms)
     distinctive_name_terms = distinctive_query_name_terms(query_terms, notes)
     activations: dict[str, dict] = {}
 
     for note in notes:
         if note.kind == "index" and Path(note.path).name == "README.md":
             continue
-        evidence = direct_match_terms(query, query_terms, distinctive_name_terms, note)
+        evidence = direct_match_terms(query, query_plan, distinctive_name_terms, note)
         if not evidence:
             continue
         activations[note.path] = {
@@ -480,6 +585,7 @@ def build_query_report(vault: Path, query: str) -> dict:
 
     return {
         "query": query,
+        "query_plan": query_plan.to_dict(),
         "query_concepts": sorted(query_concepts),
         "activations": ordered,
         "suggested_reading_order_total": len(ordered),
@@ -495,8 +601,20 @@ def build_query_report(vault: Path, query: str) -> dict:
 
 
 def markdown_report(report: dict) -> str:
+    query_plan = report.get("query_plan") or {}
+
+    def format_terms(values: list[str] | None) -> str:
+        return "、".join(values or []) or "无"
+
     lines = [
         f"# Recall Report: {report['query']}",
+        "",
+        "## Query Understanding",
+        f"- Intent: {query_plan.get('intent') or 'search'}",
+        f"- Terms: {format_terms(query_plan.get('terms'))}",
+        f"- Primary Terms: {format_terms(query_plan.get('primary_terms'))}",
+        f"- Comparison Terms: {format_terms(query_plan.get('comparison_terms'))}",
+        f"- Entity Terms: {format_terms(query_plan.get('entity_terms'))}",
         "",
         "## Query Concepts",
         "- " + ("、".join(report.get("query_concepts") or []) if report.get("query_concepts") else "无"),

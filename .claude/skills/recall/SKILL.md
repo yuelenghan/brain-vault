@@ -22,6 +22,7 @@ python3 .claude/skills/recall/scripts/recall.py \
 - Do not narrate tempdir discovery or path correction to the user unless recall still fails after using the computed fixed paths.
 - Do not pass `--vault`; run from the vault root.
 - The script reuses `.claude/skills/meditate/scripts/knowledge_model.py` for concept extraction and spreading-activation style matching. Direct hits accept exact-name mention, query-inside-name partial recall, and adaptive name-token overlap; spread activation uses one hop over both outgoing and incoming wikilinks.
+- Before matching, the script builds a deterministic query plan: classify intent (`search` / `research` / `compare`), extract query terms and Latin entity terms, and split comparison terms from primary terms when comparison markers such as `对比`, `比较`, `vs`, or `compare` are present. Retrieval uses this structured plan so a compound query can activate each entity path independently instead of requiring every entity to appear in the same note title.
 
 ## Answering rules
 
