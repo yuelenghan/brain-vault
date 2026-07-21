@@ -213,6 +213,22 @@ class RecallTest(unittest.TestCase):
         self.assertEqual("Resources/Agent Memory/XSpark 记忆编排方案.md", report["activations"][0]["path"])
         self.assertEqual("direct", report["activations"][0]["strength"])
 
+    def test_query_report_matches_latin_name_inside_multi_entity_query(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            write_note(
+                vault / "Resources" / "Agent Platforms" / "AgentDeck 项目调研报告.md",
+                "AgentDeck 项目调研报告",
+                "reference",
+                "AgentDeck is a managed agents platform for coding workflows.",
+            )
+
+            report = recall.build_query_report(vault, "调研 OpenBMB/StaffDeck，并对比 agentdeck")
+
+        self.assertTrue(report["activations"])
+        self.assertEqual("Resources/Agent Platforms/AgentDeck 项目调研报告.md", report["activations"][0]["path"])
+        self.assertEqual("direct", report["activations"][0]["strength"])
+
     def test_query_report_matches_single_phrase_concept_from_body(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp).resolve()

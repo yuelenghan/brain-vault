@@ -26,6 +26,22 @@ MAX_SUGGESTED_READING_ORDER = 20
 FIXED_REPORT_DIR = Path(os.environ.get(TEST_REPORT_DIR_ENV) or tempfile.gettempdir()).resolve()
 FIXED_JSON_REPORT = FIXED_REPORT_DIR / "recall.json"
 FIXED_MARKDOWN_REPORT = FIXED_REPORT_DIR / "recall.md"
+SINGLE_TOKEN_DIRECT_STOPWORDS = {
+    "architecture",
+    "comparison",
+    "design",
+    "platform",
+    "platforms",
+    "project",
+    "report",
+    "research",
+    "review",
+    "study",
+    "tool",
+    "tools",
+    "workflow",
+    "workflows",
+}
 
 
 def load_cross_skill_module(module_name: str, relative_path: Path):
@@ -167,6 +183,31 @@ def note_name_terms(note: NoteRecord) -> set[str]:
     return terms
 
 
+def first_latin_name_token(name: str) -> str | None:
+    for raw in re.findall(r"[A-Za-z][A-Za-z0-9-]*", name):
+        token = knowledge_model.normalize_concept_token(raw)
+        if LATIN_TOKEN_RE.fullmatch(token) and knowledge_model.meaningful_concept_token(token):
+            return token
+    return None
+
+
+def distinctive_query_name_terms(query_terms: set[str], notes: list[NoteRecord]) -> set[str]:
+    name_term_frequency: Counter[str] = Counter()
+    for note in notes:
+        for term in note_name_terms(note):
+            if " " not in term:
+                name_term_frequency[term] += 1
+    return {
+        term
+        for term in query_terms
+        if " " not in term
+        and LATIN_TOKEN_RE.fullmatch(term)
+        and len(term) >= 4
+        and term not in SINGLE_TOKEN_DIRECT_STOPWORDS
+        and 0 < name_term_frequency.get(term, 0) <= 2
+    }
+
+
 def read_note(vault: Path, path: Path, by_name: dict[str, list[str]] | None = None) -> NoteRecord:
     text = path.read_text(encoding="utf-8", errors="replace")
     frontmatter, aliases, body = parse_frontmatter(text)
@@ -248,7 +289,7 @@ def build_index(vault: Path) -> tuple[list[NoteRecord], dict[str, list[NoteRecor
     return notes, by_name, by_path, {path: sorted(sources) for path, sources in incoming_by_path.items()}
 
 
-def direct_match_terms(query: str, query_terms: set[str], note: NoteRecord) -> list[str]:
+def direct_match_terms(query: str, query_terms: set[str], distinctive_name_terms: set[str], note: NoteRecord) -> list[str]:
     matched: list[str] = []
     threshold = overlap_threshold(query_terms) if query_terms else 1
     reverse_allowed = query_supports_reverse_match(query)
@@ -265,6 +306,11 @@ def direct_match_terms(query: str, query_terms: set[str], note: NoteRecord) -> l
         overlap = sorted(query_terms & tokenize_name(name))
         if len(overlap) >= threshold:
             matched.append(f"matched title/alias/stem tokens: {name} ({', '.join(overlap[:5])})")
+            continue
+        distinctive_overlap = sorted(set(overlap) & distinctive_name_terms)
+        first_token = first_latin_name_token(name)
+        if distinctive_overlap and first_token in distinctive_overlap:
+            matched.append(f"matched distinctive title/alias/stem token: {name} ({', '.join(distinctive_overlap[:5])})")
     return list(dict.fromkeys(matched))
 
 
@@ -334,12 +380,13 @@ def build_query_report(vault: Path, query: str) -> dict:
     query_counts = knowledge_model.concept_counts_for_text(query)
     query_concepts = set(knowledge_model.top_concepts_from_counts(query_counts, limit=24))
     query_terms = build_query_terms(query_counts, query_concepts)
+    distinctive_name_terms = distinctive_query_name_terms(query_terms, notes)
     activations: dict[str, dict] = {}
 
     for note in notes:
         if note.kind == "index" and Path(note.path).name == "README.md":
             continue
-        evidence = direct_match_terms(query, query_terms, note)
+        evidence = direct_match_terms(query, query_terms, distinctive_name_terms, note)
         if not evidence:
             continue
         activations[note.path] = {
