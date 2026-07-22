@@ -717,6 +717,15 @@ def build_knowledge_index(vault: Path) -> dict:
                 if record["kind"] not in {"index", "area", "project"} and record["stem"] != "README":
                     profile["material_count"] += 1
             if scope in {"Projects", "Areas"}:
+                if scope == "Projects" and len(parts) >= 3:
+                    # 嵌套的 Projects/<project>/<note>.md：仅当存在同名兄弟目录或同名顶层
+                    # 目录 Projects/<stem>/ 时才视为子项目 ownership note；否则是项目目录内
+                    # 的内容文件（评审报告/复审报告等），不应作为 owner--否则下游会用其 stem
+                    # 构造不存在的目标目录 Projects/<stem>/ 并把它误当承接笔记。
+                    sibling_dir = path.parent / path.stem
+                    top_level_dir = vault / "Projects" / record["stem"]
+                    if not (sibling_dir.is_dir() or top_level_dir.is_dir()):
+                        continue
                 owners.append(record)
     return {"topics": topics, "owners": owners, "notes": notes}
 
