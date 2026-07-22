@@ -446,6 +446,36 @@ Verifier evidence should be attached to every handoff so meditate can trust the 
             self.assertIn('description: "Original capture with provenance metadata."', organized)
             self.assertIn("source_fingerprint: sha256:", organized)
 
+    def test_apply_ready_sanitizes_invalid_tag_chars(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            self.setup_ready_vault(vault)
+            (vault / "Inbox" / "Loop Notes.md").write_text(
+                """---
+title: "Loop Notes"
+type: reference
+tags:
+  - proj-2.0
+  - loop
+  - a.b.c
+---
+
+# Loop Notes
+
+Maker checker workflows keep autonomous coding loops grounded in independent verification.
+Stop condition design prevents a loop from continuing after evidence becomes weak.
+Verifier evidence should be attached to every handoff so meditate can trust the source.
+""",
+                encoding="utf-8",
+            )
+
+            report = ingest.make_report(vault, convert=False)
+            ingest.apply_ready(vault, report, "2026-07-02")
+
+            organized = (vault / "Resources" / "Loop Engineering" / "Loop Notes.md").read_text(encoding="utf-8")
+            self.assertIn("tags:\n  - proj-2-0\n  - loop\n  - a-b-c", organized)
+            self.assertNotIn("proj-2.0", organized)
+
     def test_apply_ready_writes_normalized_source_urls_to_frontmatter(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp).resolve()

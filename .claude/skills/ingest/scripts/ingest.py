@@ -371,6 +371,36 @@ def parse_inline_list(value: object) -> list[str]:
     return [strip_quotes(text)]
 
 
+# Obsidian tag 合法字符集见 app.js 的 jx 正则：
+# /^#[^ -⁯⸀-⹿'!"#$%&()*+,.:;<=>?@^`{|}~\[\]\\\s]+/
+# 即禁止 ASCII 标点（除 - _ /）、Unicode 标点区间和空白。含这些字符的 tag
+# 在 Properties 面板会显示为红色+删除线（is-invalid），故写入 frontmatter 前需清洗。
+_TAG_INVALID_CHARS_RE = re.compile(
+    r"[ -⁯⸀-⹿'!\"#$%&()*+,.:;<=>?@^`{|}~\[\]\\]|\s"
+)
+
+
+def sanitize_tag(tag: str) -> str:
+    """把 tag 中 Obsidian 禁用字符替换为 -，折叠连续 -，去首尾 -。
+
+    纯数字结果（如 "2024"）仍是 Obsidian 无效 tag，属另一规则，不在此处理。
+    """
+    cleaned = _TAG_INVALID_CHARS_RE.sub("-", tag.strip().lstrip("#").strip())
+    return re.sub(r"-{2,}", "-", cleaned).strip("-")
+
+
+def parse_tag_list(value: object) -> list[str]:
+    """解析 tag 列表并清洗禁用字符，保持顺序、去重、丢空。"""
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in parse_inline_list(value):
+        cleaned = sanitize_tag(raw)
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            out.append(cleaned)
+    return out
+
+
 DISTILLATION_HEADING_RE = re.compile(r"^##\s*(提炼|摘要|总结|TL;DR)\s*$", re.IGNORECASE)
 SOURCE_HEADING_RE = re.compile(r"^##\s*(原文|原文\s*/\s*摘录|摘录|原始内容|正文|Transcript)\s*$", re.IGNORECASE)
 CURATED_TRAILING_HEADING_RE = re.compile(
@@ -847,7 +877,7 @@ def encoding_plan(vault: Path, candidates: list[Candidate], index: dict) -> dict
         distillation_required = converted or source_characters > 3000
         distillation_reason = "converted source material" if converted else f"source body has {source_characters} characters"
         source_frontmatter = candidate.source_frontmatter or {}
-        tags = parse_inline_list(source_frontmatter.get("tags"))
+        tags = parse_tag_list(source_frontmatter.get("tags"))
         recommended_frontmatter: dict[str, object] = {
             "title": candidate.title or Path(candidate.markdown_path).stem,
             "type": "reference",
@@ -2520,7 +2550,7 @@ def frontmatter_patch_plan(report: dict) -> dict:
         }
         if status:
             fields["status"] = status
-        fields["tags"] = parse_inline_list(recommended.get("tags"))
+        fields["tags"] = parse_tag_list(recommended.get("tags"))
         for key in ("source_url", "canonical_url", "source"):
             if recommended.get(key):
                 fields[key] = recommended[key]
