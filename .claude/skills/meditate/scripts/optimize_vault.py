@@ -315,8 +315,23 @@ def wikilink_target(raw: str) -> str:
     return target
 
 
+_DASH_TRANSLATE = str.maketrans({
+    "‐": "-",  # HYPHEN
+    "‑": "-",  # NON-BREAKING HYPHEN
+    "‒": "-",  # FIGURE DASH
+    "–": "-",  # EN DASH
+    "—": "-",  # EM DASH
+    "−": "-",  # MINUS SIGN
+})
+
+
 def normalize_name(name: str) -> str:
-    return re.sub(r"\s+", " ", Path(name).stem.strip()).lower()
+    # Unify dash variants to ASCII hyphen so names differing only by dash
+    # style match (e.g. a bare wikilink using "-" vs a real note whose
+    # filename uses an EM DASH "-"); otherwise stub detection, broken-link
+    # resolution, and dedup all miss the match.
+    stem = Path(name).stem.strip().translate(_DASH_TRANSLATE)
+    return re.sub(r"\s+", " ", stem).lower()
 
 
 def has_path_component(target: str) -> bool:
@@ -4440,10 +4455,14 @@ def apply_empty_stubs(vault: Path, report: dict) -> None:
                 if new_text != text:
                     source_note_path.write_text(new_text, encoding="utf-8")
                 elif expected_markdown_stub_path(ref["link"]) == normalize_relpath(item["stub"]):
-                    unresolved_references = True
-                    report["skipped_uncertain"].append(
-                        {"type": "unchanged_stub_reference", "stub": item["stub"], "source": ref["source"]}
-                    )
+                    # Bare wikilink already targets the real note's filename
+                    # stem, so stem replacement is a no-op. The stub is a
+                    # 0-byte Obsidian auto-creation and a same-stem real note
+                    # exists (status == fixable). Deleting the stub alone
+                    # fixes resolution - the bare wikilink then resolves to
+                    # the real note. No wikilink edit needed; do not block
+                    # stub deletion.
+                    pass
 
         if unresolved_references:
             continue
@@ -5077,15 +5096,38 @@ def safe_self_check(vault: Path, report: dict) -> None:
         if not (vault / item["target"]).exists():
             ownership_split_missing = True
             break
-    structural_missing = False
-    for item in report["applied"].get("structural_moves", []):
-        if not (vault / item["target"]).exists():
-            structural_missing = True
-            break
+    moves = report["applied"].get("structural_moves", [])
+    # Track the last role each path plays across all structural moves (and
+    # accompanying source-file moves). A path whose last appearance is as a
+    # "source" was moved away later, so its absence is expected - it is a
+    # transient intermediate position from a cancelling rehome chain (e.g.
+    # concept_rehome A->B then topic_rehome B->A). Only a path whose last
+    # role is "target" (or that was never moved away) must still exist as a
+    # final destination.
+    last_role: dict[str, str] = {}
+    for item in moves:
+        if item.get("source"):
+            last_role[item["source"]] = "source"
+        if item.get("target"):
+            last_role[item["target"]] = "target"
         for source_move in item.get("source_moves", []):
-            if not (vault / source_move["new"]).exists():
+            if source_move.get("old"):
+                last_role[source_move["old"]] = "source"
+            if source_move.get("new"):
+                last_role[source_move["new"]] = "target"
+    structural_missing = False
+    for item in moves:
+        target = item.get("target")
+        if target and not (vault / target).exists():
+            if last_role.get(target) != "source":
                 structural_missing = True
                 break
+        for source_move in item.get("source_moves", []):
+            new = source_move.get("new")
+            if new and not (vault / new).exists():
+                if last_role.get(new) != "source":
+                    structural_missing = True
+                    break
         if structural_missing:
             break
     residual_broken_links: list[dict] = []
