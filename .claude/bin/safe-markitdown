@@ -113,6 +113,27 @@ def write_image_markdown(candidate: Path, temp_path: Path, env: dict[str, str]) 
     return 0
 
 
+def clean_leading_watermark_noise(path: Path) -> None:
+    """Strip leading single-character-line noise from a conversion output.
+
+    markitdown extracts rotated PDF watermarks (e.g. the arXiv side-bar
+    "arXiv:xxxx.xxxxxvN [cs.CL] ..." stamp) as one reversed character per
+    line. Real markdown never opens with 8+ consecutive <=1-char lines, so a
+    leading block of that shape is treated as noise and removed up to the
+    first normal line.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return
+    lines = text.split("\n")
+    idx = 0
+    while idx < len(lines) and len(lines[idx]) <= 1:
+        idx += 1
+    if idx >= 8:
+        path.write_text("\n".join(lines[idx:]).lstrip("\n"), encoding="utf-8")
+
+
 def run_markitdown(candidate: Path, temp_path: Path, env: dict[str, str]) -> int:
     command = ["markitdown", str(candidate), "-o", str(temp_path)]
     try:
@@ -125,6 +146,8 @@ def run_markitdown(candidate: Path, temp_path: Path, env: dict[str, str]) -> int
     except OSError as exc:
         print(f"safe-markitdown: failed to execute markitdown: {exc}", file=sys.stderr)
         return 127
+    if completed.returncode == 0:
+        clean_leading_watermark_noise(temp_path)
     return completed.returncode
 
 

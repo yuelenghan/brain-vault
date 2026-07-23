@@ -121,6 +121,10 @@ The script has generated a source URL and `source_fingerprint` for each `ready` 
 - Completed or expired → `Archive/`; but reusable historical assets must still be owned by an `Areas/`
 - Uncertain or insufficient information → leave in `Inbox/`
 
+- 归位目标由模型基于 PARA 语义、现有目录结构和材料类型自主判断；脚本的 `understanding_hints` / `organization_plan` / `frontmatter_patch_plan` 是建议而非指令，模型可偏离。
+- 出现归位分歧（脚本建议与模型判断不一致）时，以模型判断为准，不询问用户；在日志备注和最终输出简要说明偏离理由。归位选择、提炼、补链、frontmatter 字段均由模型自主决定。
+- ingest 必须能在 headless / cron 下全程自动运行，不依赖人工介入；仅删除/覆盖既有内容、推送远端等不可逆操作才需用户确认。
+
 ### 6. Ownership gate
 
 Before entering `Resources/` or `Archive/`, answer:

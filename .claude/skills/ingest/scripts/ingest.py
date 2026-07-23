@@ -583,6 +583,23 @@ def safe_relative_inbox(path: Path) -> str:
     return "Inbox/" + path.name
 
 
+def looks_like_error_message(text: str) -> bool:
+    """Return True only when a conversion output is itself an error message.
+
+    Long outputs are real content: technical papers/docs routinely contain
+    "Error:"/"Failure:" case labels that are not converter errors. Only a long
+    output that opens with a Python traceback (a real crash) counts. Short
+    outputs keep the original regex so markitdown/whisper stderr lines still
+    block.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if len(stripped) >= 500:
+        return bool(re.search(r"\A.{0,200}traceback \(most recent call last\)", stripped, re.IGNORECASE | re.DOTALL))
+    return bool(CONVERSION_ERROR_RE.search(stripped))
+
+
 def run_conversion(vault: Path, path: Path) -> tuple[bool, str | None]:
     converter = converter_for(path)
     if not converter:
@@ -599,7 +616,7 @@ def run_conversion(vault: Path, path: Path) -> tuple[bool, str | None]:
         converted_text = output.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         return False, "conversion output is not valid UTF-8 markdown"
-    if CONVERSION_ERROR_RE.search(converted_text.strip()):
+    if looks_like_error_message(converted_text):
         return False, "conversion output looks like an error message"
     return True, None
 
@@ -623,7 +640,7 @@ def can_pair_existing_conversion_markdown(vault: Path, markdown_rel: str, source
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         return False
-    if CONVERSION_ERROR_RE.search(text.strip()):
+    if looks_like_error_message(text):
         return False
     frontmatter, _body = parse_frontmatter(text)
     source_name = Path(source_rel).name

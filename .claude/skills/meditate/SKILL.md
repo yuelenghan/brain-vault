@@ -16,7 +16,7 @@ The working directory is the brain-vault root; all paths are relative to the vau
 - **Small auditable steps**: by default do only one optimization batch at a time; avoid large-scale body rewrites.
 - **Evidence-driven**: every move, link addition, or merge suggestion must state its basis: identical URL, identical fingerprint, explicit title reference, bidirectional topic relation, broken link, etc.
 - **Re-understand every run**: optimization is not a one-time cleanup. Each scan/apply must rebuild the current note/title/alias/link/topic/concept/ownership index from the expanded vault, then derive fresh high-confidence link, ownership, concept-profile, and structure candidates from the current graph and current note bodies.
-- **Do not corrupt source material**: generated links, indexes, and concept profiles may be appended or marker-block-updated, but must not normalize, reflow, strip control characters, or otherwise rewrite original captured source text; PDF-derived form-feed page markers (`\f`) must be preserved.
+- **Do not corrupt source material**: generated links, indexes, and concept profiles may be appended or marker-block-updated, but must not normalize, reflow, strip control characters, or otherwise rewrite original captured source text. Cleaning conversion noise (zero-width characters, leading single-char watermark blocks, stray C0/DEL control chars) restores source purity and is not a rewrite of author text; severe mojibake (NUL / UTF-16 misread) is reported only — stripping NUL leaves garbled text, so the note must be re-converted from its source file; PDF-derived form-feed page markers (`\f`) must be preserved.
 - **Protect user changes**: pre-existing uncommitted changes are protected paths — do not edit, stage, or target them for ownership updates; if there are many protected paths, this run's result may be mostly a health report rather than actual library edits.
 - **Fix certain issues first, then report the rest**: exact duplicates with strong evidence can be archived directly; high-confidence link additions, ownership profile links/back-links, stable unowned resource topics that should become Areas, unique broken links, missing metadata, small topic indexes, generated concept profiles, equivalent-topic merges, explicit topic re-homing, and high-overlap concept re-homing should be fixed where possible; only evidence conflicts, protected paths, destination collisions, and destructive deletion-style merges remain skipped.
 
@@ -101,6 +101,7 @@ The script `.claude/skills/meditate/scripts/optimize_vault.py`, together with it
 - Detecting exact duplicates: identical normalized URL, identical non-empty recomputed source-material fingerprint for material notes, or identical `source_file` with matching non-empty source fingerprint; stale fingerprints in frontmatter and empty/template-only notes are not used as an auto basis.
 - Choosing canonical via heuristics: `Resources/` first, has distillation, more inbound links, more complete body, non-`Archive/Duplicates/` first.
 - Detecting broken links and empty stubs; auto-fixing only on a unique match, reporting on multiple candidates.
+- Detecting and cleaning conversion noise: zero-width characters (ZWSP/ZWJ/ZWNJ/BOM/word-joiner), leading single-character watermark blocks (e.g. arXiv side-bar stamps extracted one reversed char per line), and stray C0/DEL control chars. PDF form-feed (`\f`) page markers are preserved. NUL-heavy / UTF-16 mojibake is reported only (re-convert from source). Under `apply-safe`, cleanable noise in non-protected notes is removed in place.
 - Deterministically re-understanding explicit entity and ownership mentions: when a material note body directly mentions an existing Area / Project / material note title, alias, or filename stem and does not already link it, report a link candidate; under `apply-safe`, add only high-confidence explicit links and Area/Project back-links.
 - Deterministically re-understanding same-topic peers: when two material notes in the same `Resources/<topic>/` share at least 3 pair-distinctive stable concepts, at least one of those concepts appears in both note titles, and the notes do not already link each other, report reciprocal peer-link candidates; under `apply-safe`, add missing `## 关联` bullets while preserving the per-note link cap.
 - Deterministically re-understanding ownership: extract concept profiles from existing `Areas/` and `Projects/`; when a material note overlaps a unique ownership profile by distinctive concepts, add a material → owner wikilink and reciprocal owner `## 资料索引` entry.
@@ -188,6 +189,7 @@ Beyond dedup and linking, check these low-risk optimizations:
 
 Allowed auto-modifications are limited to (anything not in this list is report-only, not executed):
 
+- The script's `apply-safe` cleaning conversion noise (zero-width characters, leading single-char watermark blocks, stray C0/DEL control chars) from non-protected notes, preserving PDF form-feed (`\f`) page markers
 - The script's `apply-safe` adding `source_url` / `source_fingerprint` to non-protected material notes
 - The script's `apply-safe` moving strongly-evidenced original source files into lowercase `source/` via `git mv`, renaming them to match the Markdown filename stem, and updating `source_file` plus the visible `原始文件` link
 - The script's `apply-safe` moving exact-duplicate notes into `Archive/Duplicates/` via `git mv` and adding the duplicate marker
@@ -270,6 +272,8 @@ Log format:
 - 概念画像：<count>
 - 语义综合：<count>
 - 再巩固：<count>
+- 噪音清理：<count>
+- 编码损坏报告：<count>
 - 结构建议：<count>
 commit: <hash or 无>
 ```
@@ -291,6 +295,7 @@ Keep the user-facing output concise and consistently separate "what was done" fr
 - 失效链接修复：<count; write "无" if none>
 - 概念画像：<count; write "无" if none>
 - 结构迁移：<count; write "无" if none>
+- 噪音清理：<count; zero-width / watermark / stray control; write "无" if none>
 
 ## 只报告，未自动处理
 - 疑似重复：<count and reason; write "无" if none>

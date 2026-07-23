@@ -1244,6 +1244,18 @@ exit 0
         self.assertEqual("conversion output looks like an error message", candidate["reason"])
         self.assertNotIn("Inbox/Broken.txt", report["understanding_hints"])
 
+    def test_looks_like_error_message_short_stderr_still_blocks(self) -> None:
+        self.assertTrue(ingest.looks_like_error_message("ERROR: markitdown failed to parse the source file"))
+        self.assertTrue(ingest.looks_like_error_message("Traceback (most recent call last):\n  File \"x.py\", line 1"))
+
+    def test_looks_like_error_message_long_paper_with_failure_is_not_error(self) -> None:
+        body = "Published as a conference paper at ICLR 2023\n\n" + ("durable evidence text. " * 40) + "\n\nFailure: Reasoning error case label.\n"
+        self.assertFalse(ingest.looks_like_error_message(body))
+
+    def test_looks_like_error_message_long_traceback_still_blocks(self) -> None:
+        body = "Traceback (most recent call last):\n" + ("  long traceback line\n" * 60)
+        self.assertTrue(ingest.looks_like_error_message(body))
+
     def test_encoding_plan_requires_distillation_for_long_ready_material(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp).resolve()

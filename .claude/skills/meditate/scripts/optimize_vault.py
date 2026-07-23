@@ -965,6 +965,110 @@ def metadata_missing(notes: list[Note]) -> list[dict]:
     return missing
 
 
+# Conversion noise: zero-width chars, leading single-char watermark blocks, stray
+# C0/DEL control chars. PDF form-feed (\f) is a legitimate page marker and is
+# preserved; any NUL means likely encoding corruption (UTF-16 misread) and is
+# reported, not cleaned, because stripping NUL leaves garbled text rather than
+# the source - the note must be re-converted from its source file instead.
+ZERO_WIDTH_CHARS = {"​", "‌", "‍", "⁠", "﻿"}
+
+
+def detect_content_noise(text: str) -> dict:
+    """Classify conversion noise in a note body.
+
+    Counts zero_width, watermark_lines (leading single-char block >=8 lines,
+    e.g. arXiv side-bar stamp extracted one reversed char per line),
+    stray_control (C0/DEL excluding \\n \\t \\f), form_feed, nul.
+    """
+    zero_width = sum(1 for c in text if c in ZERO_WIDTH_CHARS)
+    nul = text.count("\x00")
+    lines = text.split("\n")
+    idx = 0
+    while idx < len(lines) and len(lines[idx]) <= 1:
+        idx += 1
+    watermark_lines = idx if idx >= 8 else 0
+    stray_control = sum(
+        1 for c in text
+        if (ord(c) < 32 or ord(c) == 0x7f) and c not in "\n\t\f\x00"
+    )
+    form_feed = text.count("\f")
+    return {
+        "zero_width": zero_width,
+        "watermark_lines": watermark_lines,
+        "stray_control": stray_control,
+        "form_feed": form_feed,
+        "nul": nul,
+    }
+
+
+def content_noise_findings(notes: list[Note]) -> list[dict]:
+    """Scan notes for conversion noise. Cleanable noise (zero-width / watermark /
+    stray control) is returned with kind='cleanable'; any NUL is returned with
+    kind='encoding_damage' for report-only handling (re-convert from source).
+    """
+    findings: list[dict] = []
+    for note in notes:
+        try:
+            text = note.abs_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        noise = detect_content_noise(text)
+        if noise["nul"]:
+            findings.append({
+                "path": note.path,
+                "kind": "encoding_damage",
+                "nul": noise["nul"],
+                "suggestion": "原文含 NUL/编码损坏，建议用 source 原文件重新转换（meditate 不自动清理）",
+            })
+            continue
+        counts = {
+            k: v for k, v in (
+                ("zero_width", noise["zero_width"]),
+                ("watermark_lines", noise["watermark_lines"]),
+                ("stray_control", noise["stray_control"]),
+            ) if v
+        }
+        if counts:
+            findings.append({
+                "path": note.path,
+                "kind": "cleanable",
+                "counts": counts,
+                "form_feed_preserved": noise["form_feed"],
+            })
+    return findings
+
+
+def clean_content_noise_text(text: str) -> tuple[str, dict]:
+    """Remove conversion noise (zero-width chars, leading single-char watermark
+    block, stray C0/DEL control chars) while preserving \\n, \\t, and PDF
+    form-feed \\f. Returns the cleaned text and per-type removal counts.
+    """
+    cleaned = {"zero_width": 0, "watermark_lines": 0, "stray_control": 0}
+    lines = text.split("\n")
+    idx = 0
+    while idx < len(lines) and len(lines[idx]) <= 1:
+        idx += 1
+    if idx >= 8:
+        cleaned["watermark_lines"] = idx
+        text = "\n".join(lines[idx:]).lstrip("\n")
+    zw_before = sum(1 for c in text if c in ZERO_WIDTH_CHARS)
+    if zw_before:
+        for zw_c in ZERO_WIDTH_CHARS:
+            text = text.replace(zw_c, "")
+        cleaned["zero_width"] = zw_before
+    stray_before = sum(
+        1 for c in text
+        if (ord(c) < 32 or ord(c) == 0x7f) and c not in "\n\t\f\x00"
+    )
+    if stray_before:
+        text = "".join(
+            c for c in text
+            if not ((ord(c) < 32 or ord(c) == 0x7f) and c not in "\n\t\f\x00")
+        )
+        cleaned["stray_control"] = stray_before
+    return text, cleaned
+
+
 def orphan_notes(notes: list[Note]) -> list[str]:
     return sorted(note.path for note in notes if note.inbound_count == 0 and note.outbound_count == 0 and note.path.startswith("Resources/"))
 
@@ -3722,6 +3826,34 @@ def apply_metadata(notes: list[Note], report: dict) -> None:
             report["applied"]["metadata"].append({"path": note.path, "fields": sorted(fields)})
 
 
+def apply_content_noise(vault: Path, report: dict) -> None:
+    """Clean conversion noise (zero-width / watermark / stray control chars) in
+    non-protected notes; preserve \\f and leave NUL-heavy mojibake to report.
+    """
+    applied = report["applied"].setdefault("content_noise", [])
+    protected = set(report.get("protected_paths", []))
+    for item in report.get("content_noise", []):
+        if item.get("kind") != "cleanable":
+            continue
+        note_path = item["path"]
+        if is_protected(note_path, protected):
+            report["skipped_uncertain"].append({"type": "protected_content_noise", "path": note_path})
+            continue
+        abs_path = vault / note_path
+        try:
+            text = abs_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        new_text, cleaned = clean_content_noise_text(text)
+        if new_text != text:
+            abs_path.write_text(new_text, encoding="utf-8")
+            applied.append({
+                "path": note_path,
+                "cleaned": cleaned,
+                "form_feed_preserved": item.get("form_feed_preserved", 0),
+            })
+
+
 def apply_staleness(vault: Path, report: dict, date_text: str) -> None:
     applied = report["applied"].setdefault("staleness", [])
     protected = set(report.get("protected_paths", []))
@@ -4361,6 +4493,8 @@ def append_log(vault: Path, report: dict, date: str) -> None:
         f"- 承接分化：{len(report['applied'].get('ownership_splits', []))}\n"
         "- 语义综合：0\n"
         "- 再巩固：0\n"
+        f"- 噪音清理：{len(report['applied'].get('content_noise', []))}\n"
+        f"- 编码损坏报告：{len(report.get('report_only', {}).get('encoding_damage', []))}\n"
         "commit: 无\n"
     )
     old = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
@@ -4405,6 +4539,7 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
     staleness = staleness_report(vault, notes, retrieval_180)
     safety_notes = structural_safety_notes(vault, scopes, protected, notes)
     empty_stub_findings = empty_stubs(vault, notes, by_name)
+    content_noise_items = content_noise_findings(notes)
     topic_index_findings = topic_index_gaps(vault, scopes, protected, retrieval_90, staleness)
     understanding_candidates = understanding_link_candidates(notes, resolution_notes)
     structure_candidates = structural_reunderstanding_candidates(vault, notes, protected, safety_notes)
@@ -4436,6 +4571,7 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
             resolution_attachment_targets,
         ),
         "empty_stubs": empty_stub_findings,
+        "content_noise": content_noise_items,
         "source_file_anomalies": source_file_anomalies(vault, scopes, notes, protected),
         "metadata_missing": metadata_missing(notes),
         "orphan_notes": orphan_notes(notes),
@@ -4472,6 +4608,7 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
             "ownership_structure": [],
             "ownership_splits": [],
             "staleness": [],
+            "content_noise": [],
         },
         "report_only": {
             "suspected_duplicates": [],
@@ -4490,6 +4627,7 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
             "topic_relation_candidates": topic_relation_findings,
             "synthesis_candidates": synthesis,
             "restatement_candidates": restatement,
+            "encoding_damage": [i for i in content_noise_items if i.get("kind") == "encoding_damage"],
         },
         "skipped_uncertain": [],
         "verification": {},
@@ -4798,6 +4936,14 @@ def markdown_report(report: dict) -> str:
         f"- `{item['source']}` 中 `[[{item['link']}]]` → {', '.join('`' + path + '`' for path in item.get('matches', [])) or '无候选'}"
         for item in report.get("verification", {}).get("residual_broken_links", [])
     ]
+    content_noise_applied_lines = [
+        f"- `{item['path']}`：清理 " + "、".join(f"{k} {v}" for k, v in item.get("cleaned", {}).items() if v)
+        for item in report["applied"].get("content_noise", [])
+    ]
+    encoding_damage_lines = [
+        f"- `{item['path']}`：NUL {item.get('nul', 0)} 个；{item.get('suggestion', '')}"
+        for item in report["report_only"].get("encoding_damage", [])
+    ]
     lines = [
         "## 范围与扫描结果",
         f"- 范围：{', '.join(report['scope'])}",
@@ -4819,6 +4965,7 @@ def markdown_report(report: dict) -> str:
         "- 重构承接 Area：" + ("\n" + "\n".join(ownership_structure_applied_lines) if ownership_structure_applied_lines else "无"),
         "- 分化承接 Area：" + ("\n" + "\n".join(ownership_split_applied_lines) if ownership_split_applied_lines else "无"),
         "- 结构迁移：" + ("\n" + "\n".join(structural_applied_lines) if structural_applied_lines else "无"),
+        "- 噪音清理：" + ("\n" + "\n".join(content_noise_applied_lines) if content_noise_applied_lines else "无"),
         "",
         "## 只报告，未自动处理",
         "- 完全重复候选：" + ("；".join(duplicate_lines) if duplicate_lines else "无"),
@@ -4839,6 +4986,7 @@ def markdown_report(report: dict) -> str:
         "- 分化承接 Area 候选：" + ("\n" + "\n".join(ownership_split_candidate_lines) if ownership_split_candidate_lines else "无"),
         "- 原文附件异常：" + ("\n" + "\n".join(source_pending_lines) if source_pending_lines else "无"),
         "- frontmatter 值非法（Obsidian 属性会失效，需给含 `: ` 的 value 加引号）：" + ("\n" + "\n".join(invalid_fm_lines) if invalid_fm_lines else "无"),
+        "- 编码损坏（mojibake，建议用 source 重新转换）：" + ("\n" + "\n".join(encoding_damage_lines) if encoding_damage_lines else "无"),
         "",
         "## 跳过 / 不确定",
         "- protected paths：" + (", ".join(f"`{p}`" for p in report["protected_paths"]) if report["protected_paths"] else "无"),
@@ -5067,6 +5215,9 @@ def main(argv: list[str]) -> int:
         protected = set(report["protected_paths"])
         notes, _by_name, _file_stems, _attachment_targets = build_index(vault, scopes, protected)
         date = args.date or "未注明日期"
+        progress(args.progress, "apply content noise")
+        apply_content_noise(vault, report)
+        notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report)
         progress(args.progress, "apply source file policy")
         apply_source_file_policy(vault, report)
         notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report)
