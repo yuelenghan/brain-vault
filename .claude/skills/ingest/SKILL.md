@@ -220,6 +220,7 @@ Run `git status --short` and confirm:
 - The diff of pre-existing non-Inbox changes is unchanged; if there were unrelated changes before, they should remain as-is after organizing.
 - The ownership gate for `Resources/` / `Archive/` has passed or has a clear no-ownership reason.
 - Files left in `Inbox/` all have a reason.
+- For every note moved/edited this run, run `python3 .claude/skills/ingest/scripts/verify_wikilinks.py --file "<target note>"` (repeat `--file` for each) and confirm `ok`; this is mandatory when you hand-edited wikilinks instead of letting `apply-ready` write them. A non-zero exit with "apostrophe mismatch" means a wikilink uses a visually-identical but codepoint-different character (e.g. ASCII `'` U+0027 vs curly `'` U+2019) and will create a 0-byte stub in Obsidian - fix the wikilink to the actual file stem printed in the message before committing.
 
 If anything is unsatisfied, do not commit; undo safely if possible, otherwise stop and report truthfully.
 
