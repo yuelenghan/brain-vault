@@ -2281,6 +2281,222 @@ def structural_reunderstanding_candidates(
     return candidates
 
 
+def projects_ownership_notes(notes: list[Note]) -> dict[str, str]:
+    """Top-level Projects/<stem>.md ownership notes (frontmatter type: project).
+
+    Returns normalize_name(stem) -> raw stem."""
+    owners: dict[str, str] = {}
+    for note in notes:
+        parts = Path(note.path).parts
+        if len(parts) == 2 and parts[0] == "Projects" and note_kind(note) == "project":
+            raw_stem = Path(note.path).stem
+            owners[normalize_name(raw_stem)] = raw_stem
+    return owners
+
+
+def _project_stem_prefix_matches(haystack_norm: str, owners: dict[str, str]) -> list[str]:
+    """Raw ownership stems whose normalized stem is a prefix token of
+    haystack_norm (equal, or haystack starts with stem + space). Longest-first."""
+    matched: list[str] = []
+    for p_norm, p_raw in owners.items():
+        if haystack_norm == p_norm or haystack_norm.startswith(p_norm + " "):
+            matched.append(p_raw)
+    matched.sort(key=len, reverse=True)
+    return matched
+
+
+def _project_dir_move_status(
+    vault: Path,
+    source_dir: str,
+    target_dir: str,
+    protected: set[str],
+    notes: list[Note],
+    all_notes: list[Note],
+) -> tuple[str, str]:
+    if is_protected(source_dir, protected) or is_protected(target_dir, protected):
+        return "protected", "source or target directory has pre-existing uncommitted changes"
+    if (vault / target_dir).exists():
+        return "destination_exists", "target directory already exists"
+    source_prefix = source_dir + "/"
+    has_note = False
+    for note in notes:
+        np = Path(note.path)
+        if len(np.parts) < 3 or np.parts[0] != "Projects":
+            continue
+        if f"Projects/{np.parts[1]}/" != source_prefix:
+            continue
+        has_note = True
+        if is_protected(note.path, protected):
+            return "protected", "a note inside the source directory has pre-existing uncommitted changes"
+    if not has_note:
+        return "empty_source", "source directory has no Markdown notes"
+    scoped_paths = {n.path for n in notes}
+    for note in all_notes:
+        np = Path(note.path)
+        if len(np.parts) < 3 or np.parts[0] != "Projects":
+            continue
+        if f"Projects/{np.parts[1]}/" != source_prefix:
+            continue
+        incoming = path_qualified_incoming_wikilink_sources(note, all_notes)
+        for src in incoming:
+            if src not in scoped_paths:
+                return "outside_scope", "incoming path-qualified wikilinks exist outside the requested scope"
+            if is_protected(src, protected):
+                return "protected", "incoming path-qualified wikilinks have pre-existing uncommitted changes"
+        if incoming and len(filename_stem_matches(note, all_notes)) > 1:
+            return "ambiguous_incoming_link", "incoming path-qualified wikilinks cannot be uniquely repaired to the target filename stem"
+    return "fixable", "project subdirectory merges under the owning project"
+
+
+def projects_structure_candidates(
+    vault: Path,
+    notes: list[Note],
+    protected: set[str],
+    all_notes: list[Note] | None = None,
+) -> list[dict]:
+    """Projects/ structural reorganization candidates.
+
+    Two kinds:
+    - project_dir_merge: a stray top-level Projects/<dir>/ whose name begins
+      with an ownership project stem token moves under Projects/<project>/<dir>/.
+    - project_note_rehome: a content note under Projects/<dir>/ whose stem
+      begins with a different ownership project stem rehomes to
+      Projects/<project>/ (or Projects/<project>/<sub>/ when a matching
+      subdirectory exists), e.g. proj review reports under integration-project/.
+    """
+    safety_notes = all_notes if all_notes is not None else notes
+    owners = projects_ownership_notes(notes)
+    if not owners:
+        return []
+
+    candidates: list[dict] = []
+
+    top_dirs: list[str] = []
+    projects_root = vault / "Projects"
+    if projects_root.is_dir():
+        for child in sorted(projects_root.iterdir()):
+            if child.is_dir() and not child.name.startswith("."):
+                top_dirs.append(child.name)
+
+    # A. project_dir_merge
+    dir_merge_targets: dict[str, str] = {}
+    for dir_name in top_dirs:
+        dir_norm = normalize_name(dir_name)
+        if dir_norm in owners:
+            continue  # ownership note + same-name dir: keep
+        matched = _project_stem_prefix_matches(dir_norm, owners)
+        if not matched:
+            continue
+        if len(matched) > 1 and len(matched[0]) == len(matched[1]):
+            candidates.append({
+                "source": f"Projects/{dir_name}",
+                "target": "",
+                "kind": "project_dir_merge",
+                "matched": matched[:2],
+                "from_dir": dir_name,
+                "to_project": "",
+                "status": "ambiguous",
+                "fixable": False,
+                "reason": "directory name matches multiple project stems",
+                "source_moves": [],
+            })
+            continue
+        project = matched[0]
+        if not (vault / "Projects" / project).is_dir():
+            continue
+        source_dir = f"Projects/{dir_name}"
+        target_dir = f"Projects/{project}/{dir_name}"
+        status, reason = _project_dir_move_status(vault, source_dir, target_dir, protected, notes, safety_notes)
+        if status == "fixable":
+            dir_merge_targets[source_dir] = target_dir
+        candidates.append({
+            "source": source_dir,
+            "target": target_dir,
+            "kind": "project_dir_merge",
+            "matched": [project],
+            "from_dir": dir_name,
+            "to_project": project,
+            "status": status,
+            "fixable": status == "fixable",
+            "reason": reason,
+            "source_moves": [],
+        })
+
+    # Subdir index per project: current subdirs + subdirs that dir merges will create.
+    project_subdirs: dict[str, list[str]] = {}
+    for project in owners.values():
+        subdirs: list[str] = []
+        pdir = vault / "Projects" / project
+        if pdir.is_dir():
+            for child in pdir.iterdir():
+                if child.is_dir() and not child.name.startswith("."):
+                    subdirs.append(child.name)
+        for src, tgt in dir_merge_targets.items():
+            tgt_parts = Path(tgt).parts
+            if len(tgt_parts) == 3 and tgt_parts[0] == "Projects" and tgt_parts[1] == project:
+                subdirs.append(tgt_parts[2])
+        project_subdirs[project] = subdirs
+
+    # B. project_note_rehome
+    for note in sorted(notes, key=lambda n: n.path):
+        parts = Path(note.path).parts
+        if len(parts) != 3 or parts[0] != "Projects":
+            continue
+        dir_name = parts[1]
+        if f"Projects/{dir_name}" in dir_merge_targets:
+            continue  # moves with the directory
+        note_stem = Path(note.path).stem
+        note_norm = normalize_name(note_stem)
+        matched = _project_stem_prefix_matches(note_norm, owners)
+        if not matched:
+            continue
+        if len(matched) > 1 and len(matched[0]) == len(matched[1]):
+            candidates.append({
+                "source": note.path,
+                "target": "",
+                "kind": "project_note_rehome",
+                "matched": matched[:2],
+                "from_dir": dir_name,
+                "to_project": "",
+                "to_subdir": "",
+                "status": "ambiguous",
+                "fixable": False,
+                "reason": "note stem matches multiple project stems",
+                "source_moves": [],
+            })
+            continue
+        project = matched[0]
+        if project == dir_name:
+            continue  # already under the owning project
+        best_sub = ""
+        best_len = -1
+        for sub in project_subdirs.get(project, []):
+            sub_norm = normalize_name(sub)
+            if note_norm == sub_norm or note_norm.startswith(sub_norm):
+                if len(sub_norm) > best_len:
+                    best_sub = sub
+                    best_len = len(sub_norm)
+        filename = Path(note.path).name
+        target_note = f"Projects/{project}/{best_sub}/{filename}" if best_sub else f"Projects/{project}/{filename}"
+        status, reason, source_moves = structural_move_status(
+            vault, note, target_note, protected, notes, safety_notes,
+        )
+        candidates.append({
+            "source": note.path,
+            "target": target_note,
+            "kind": "project_note_rehome",
+            "matched": [project] + ([best_sub] if best_sub else []),
+            "from_dir": dir_name,
+            "to_project": project,
+            "to_subdir": best_sub,
+            "status": status,
+            "fixable": status == "fixable",
+            "reason": reason,
+            "source_moves": source_moves,
+        })
+    return candidates
+
+
 def same_topic_peer_link_candidates(notes: list[Note], existing_candidates: list[dict]) -> list[dict]:
     candidates: list[dict] = []
     source_counts = Counter(item["source"] for item in existing_candidates)
@@ -3788,6 +4004,106 @@ def apply_structural_reorganization(vault: Path, report: dict) -> None:
             )
 
 
+def _sync_ownership_path_text(vault: Path, report: dict, applied_moves: list[dict]) -> None:
+    """After Projects/ structural moves, update plain-text '承接 Projects/...'
+    path references inside ownership notes so audit text stays consistent.
+    Only literal path strings are replaced; wikilinks are never touched."""
+    if not applied_moves:
+        return
+    protected = set(report.get("protected_paths", []))
+    scopes = report.get("scope", DEFAULT_SCOPES)
+    notes, _by_name, _file_stems, _attachment_targets = build_index(vault, scopes, protected)
+    text_applied = report["applied"].setdefault("projects_structure_text", [])
+    replacements: list[tuple[str, str]] = []
+    for mv in applied_moves:
+        if mv["kind"] == "project_dir_merge":
+            replacements.append((mv["source"] + "/", mv["target"] + "/"))
+        else:
+            replacements.append((mv["source"], mv["target"]))
+    replacements.sort(key=lambda pair: len(pair[0]), reverse=True)
+    for note in notes:
+        if note_kind(note) not in {"project", "area"}:
+            continue
+        if is_protected(note.path, protected):
+            continue
+        text = note.abs_path.read_text(encoding="utf-8")
+        new_text = text
+        changed: list[tuple[str, str]] = []
+        for old, new in replacements:
+            if old == new or old not in new_text:
+                continue
+            new_text = new_text.replace(old, new)
+            changed.append((old, new))
+        if new_text != text:
+            note.abs_path.write_text(new_text, encoding="utf-8")
+            text_applied.append({"path": note.path, "replacements": changed})
+
+
+def apply_projects_structure(vault: Path, report: dict) -> None:
+    """Execute Projects/ structural moves: directory merges first, then
+    individual note rehoming, then sync plain-text ownership path references."""
+    applied = report["applied"].setdefault("projects_structure_moves", [])
+    protected = set(report.get("protected_paths", []))
+    scopes = report.get("scope", DEFAULT_SCOPES)
+    candidates = report.get("understanding", {}).get("projects_structure_candidates", [])
+
+    # A. project_dir_merge
+    for item in candidates:
+        if item.get("kind") != "project_dir_merge" or not item.get("fixable"):
+            continue
+        source = item["source"]
+        target = item["target"]
+        if not source or not target or not (vault / source).is_dir():
+            append_skipped_once(report, {"type": "projects_structure_missing_dir", **item})
+            continue
+        ok, error = git_mv_checked(vault, source, target)
+        if not ok:
+            append_skipped_once(report, {"type": "projects_structure_dir_git_mv_failed", "error": error, **item})
+            continue
+        notes, _by_name, _file_stems, _attachment_targets = build_index(vault, scopes, protected)
+        for n in notes:
+            if n.path.startswith(target + "/") and n.path.endswith(".md"):
+                old_rel = source + "/" + Path(n.path).name
+                repair_structural_incoming_wikilinks(vault, report, old_rel, n.path)
+        applied.append({"source": source, "target": target, "kind": "project_dir_merge", "matched": item.get("matched", [])})
+
+    # B. project_note_rehome
+    for item in candidates:
+        if item.get("kind") != "project_note_rehome" or not item.get("fixable"):
+            continue
+        source = item["source"]
+        target = item["target"]
+        if not source or not target or not (vault / source).exists():
+            append_skipped_once(report, {"type": "projects_structure_missing_note", **item})
+            continue
+        ok, error = git_mv_checked(vault, source, target)
+        if not ok:
+            append_skipped_once(report, {"type": "projects_structure_note_git_mv_failed", "error": error, **item})
+            continue
+        moved_sources: list[dict] = []
+        failed_source_move: str | None = None
+        for sm in item.get("source_moves", []):
+            if not (vault / sm["old"]).exists():
+                continue
+            ok2, err2 = git_mv_checked(vault, sm["old"], sm["new"])
+            if not ok2:
+                failed_source_move = err2
+                break
+            moved_sources.append({"old": sm["old"], "new": sm["new"]})
+        if failed_source_move:
+            append_skipped_once(report, {"type": "projects_structure_source_git_mv_failed", "error": failed_source_move, **item})
+        repair_structural_incoming_wikilinks(vault, report, source, target)
+        applied.append({
+            "source": source,
+            "target": target,
+            "kind": "project_note_rehome",
+            "matched": item.get("matched", []),
+            "source_moves": moved_sources,
+        })
+
+    _sync_ownership_path_text(vault, report, applied)
+
+
 def apply_source_file_policy(vault: Path, report: dict) -> None:
     for item in report.get("source_file_anomalies", []):
         if item.get("status") != "fixable" or not item.get("note"):
@@ -4562,6 +4878,7 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
     topic_index_findings = topic_index_gaps(vault, scopes, protected, retrieval_90, staleness)
     understanding_candidates = understanding_link_candidates(notes, resolution_notes)
     structure_candidates = structural_reunderstanding_candidates(vault, notes, protected, safety_notes)
+    projects_structure_findings = projects_structure_candidates(vault, notes, protected, safety_notes)
     split_decisions = resource_topic_split_decisions(notes)
     profile_findings = understanding_profile_gaps(vault, notes, protected)
     ownership_area_findings = ownership_area_candidates(vault, notes, protected, resolution_notes)
@@ -4609,6 +4926,7 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
             "topic_profiles": topic_profiles,
             "topic_relation_candidates": topic_relation_findings,
             "ownership_profiles": owner_profiles,
+            "projects_structure_candidates": projects_structure_findings,
         },
         "applied": {
             "duplicates": [],
@@ -4628,6 +4946,8 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
             "ownership_splits": [],
             "staleness": [],
             "content_noise": [],
+            "projects_structure_moves": [],
+            "projects_structure_text": [],
         },
         "report_only": {
             "suspected_duplicates": [],
@@ -4647,6 +4967,7 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
             "synthesis_candidates": synthesis,
             "restatement_candidates": restatement,
             "encoding_damage": [i for i in content_noise_items if i.get("kind") == "encoding_damage"],
+            "projects_structure_candidates": projects_structure_findings,
         },
         "skipped_uncertain": [],
         "verification": {},
@@ -4664,6 +4985,9 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
     for item in report["understanding"]["structure_candidates"]:
         if not item.get("fixable"):
             append_skipped_once(report, {"type": "structural_reunderstanding", **item})
+    for item in report["understanding"]["projects_structure_candidates"]:
+        if not item.get("fixable"):
+            append_skipped_once(report, {"type": "projects_structure", **item})
     for item in report["understanding_profile_gaps"]:
         if not item.get("fixable"):
             report["skipped_uncertain"].append({"type": "understanding_profile_gap", **item})
@@ -4737,11 +5061,18 @@ def refresh_report_findings(vault: Path, report: dict, include_structure: bool =
             protected,
             safety_notes,
         )
+        report["understanding"]["projects_structure_candidates"] = projects_structure_candidates(
+            vault,
+            notes,
+            protected,
+            safety_notes,
+        )
     report["report_only"]["topic_index_gaps"] = report["topic_index_gaps"]
     report["report_only"]["staleness_report"] = report["staleness_report"]
     report["report_only"]["understanding_profile_gaps"] = report["understanding_profile_gaps"]
     report["report_only"]["understanding_link_candidates"] = report["understanding"]["link_candidates"]
     report["report_only"]["structure_candidates"] = report["understanding"].get("structure_candidates", [])
+    report["report_only"]["projects_structure_candidates"] = report["understanding"].get("projects_structure_candidates", [])
     report["report_only"]["resource_topic_split_decisions"] = report["understanding"]["resource_topic_split_decisions"]
     report["report_only"]["ownership_area_candidates"] = report["understanding"]["ownership_area_candidates"]
     report["report_only"]["ownership_area_profile_gaps"] = report["understanding"]["ownership_area_profile_gaps"]
@@ -4783,6 +5114,11 @@ def refresh_report_findings(vault: Path, report: dict, include_structure: bool =
     for item in report["understanding"]["ownership_split_candidates"]:
         if not item.get("fixable"):
             skipped = {"type": "ownership_split", **item}
+            if skipped not in report["skipped_uncertain"]:
+                report["skipped_uncertain"].append(skipped)
+    for item in report["understanding"].get("projects_structure_candidates", []):
+        if not item.get("fixable"):
+            skipped = {"type": "projects_structure", **item}
             if skipped not in report["skipped_uncertain"]:
                 report["skipped_uncertain"].append(skipped)
     return notes, by_name, file_stems, attachment_targets
@@ -5269,6 +5605,14 @@ def main(argv: list[str]) -> int:
             apply_structural_reorganization(vault, report)
             notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report)
             after = len(report["applied"].get("structural_moves", []))
+            if after == before:
+                break
+        for _ in range(5):
+            progress(args.progress, "apply projects structure")
+            before = len(report["applied"].get("projects_structure_moves", []))
+            apply_projects_structure(vault, report)
+            notes, _by_name, _file_stems, _attachment_targets = refresh_report_findings(vault, report)
+            after = len(report["applied"].get("projects_structure_moves", []))
             if after == before:
                 break
         progress(args.progress, "apply staleness")
