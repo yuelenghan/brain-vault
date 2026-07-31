@@ -315,6 +315,18 @@ def wikilink_target(raw: str) -> str:
     return target
 
 
+def is_handle_wikilink_target(target: str) -> bool:
+    """A wikilink target that is a social handle, not a vault note.
+
+    Targets beginning with @ (e.g. ``[[@Vercantez]]``) come from upstream
+    clippers wrapping a social handle as a wikilink; no ``@handle.md`` note
+    should exist in the vault. Such links are unresolved graph nodes (grey
+    dots) and must be downgraded to plain text rather than repaired to point
+    at another note.
+    """
+    return target.startswith("@")
+
+
 _DASH_TRANSLATE = str.maketrans({
     "‐": "-",  # HYPHEN
     "‑": "-",  # NON-BREAKING HYPHEN
@@ -708,7 +720,14 @@ def broken_links(
                 # No match at all — try loose substring fallback on title
                 loose = [n.path for n in resolution_notes if key and key in normalize_name(n.title)]
                 finding = {"source": note.path, "link": link, "matches": sorted(set(loose))}
-                finding["status"] = "unique" if len(set(loose)) == 1 else "ambiguous"
+                if len(set(loose)) == 1:
+                    finding["status"] = "unique"
+                elif is_handle_wikilink_target(target):
+                    # Social handle wrapped as wikilink (e.g. [[@Vercantez]]);
+                    # no @handle.md note should exist -> downgrade to plain text
+                    finding["status"] = "handle"
+                else:
+                    finding["status"] = "ambiguous"
                 findings.append(finding)
     return findings
 
@@ -954,12 +973,25 @@ def empty_stubs(vault: Path, notes: list[Note], by_name: dict[str, list[Note]]) 
                 )
             suggested_target = sorted(set(match_candidates), key=_stub_target_score)[0]
 
+        if suggested_target and references:
+            status = "fixable"
+        elif not references:
+            status = "orphan_stub"
+        else:
+            # Has references but no real target: if all causal links are
+            # handle-wikilinks ([[ @handle ]]) the stub came from a social
+            # handle that should never be a note -> downgrade to plain text.
+            handle_refs = [r for r in references if is_handle_wikilink_target(wikilink_target(r["link"]))]
+            if handle_refs and len(handle_refs) == len(references):
+                status = "handle_stub"
+            else:
+                status = "unmatched"
         findings.append(
             {
                 "stub": rel,
                 "references": references,
                 "suggested_target": suggested_target,
-                "status": "fixable" if suggested_target and references else ("orphan_stub" if not references else "unmatched"),
+                "status": status,
             }
         )
     return findings
@@ -3766,6 +3798,33 @@ def replace_wikilink(text: str, old: str, new: str) -> str:
     return WIKILINK_RE.sub(repl, text)
 
 
+def strip_wikilink_to_plain(text: str, link: str) -> str:
+    """Replace [[X]] with plain text X (downgrade, not repair).
+
+    Unlike replace_wikilink which keeps [[...]] wrapping, this removes the
+    wrapping entirely so the handle becomes plain text that no longer forms a
+    graph edge. Used for handle-wikilinks ([[ @handle ]]) that should never be
+    notes. If the wikilink carried an alias, use the alias as the plain text
+    (it is the author's intended display form).
+    """
+    old_target = wikilink_target(link)
+
+    def repl(match: re.Match[str]) -> str:
+        raw = match.group(1)
+        target, *rest = raw.split("|", 1)
+        target_base, *anchor = target.split("#", 1)
+        if has_path_component(old_target):
+            if normalize_relpath(target_base) != normalize_relpath(old_target):
+                return match.group(0)
+        elif normalize_name(target_base) != normalize_name(old_target):
+            return match.group(0)
+        if rest:
+            return rest[0].strip()
+        return target_base.strip()
+
+    return WIKILINK_RE.sub(repl, text)
+
+
 def upsert_source_file_frontmatter(text: str, canonical_ref: str) -> str:
     trailing_newline = text.endswith("\n")
     lines = text[:-1].split("\n") if trailing_newline else text.split("\n")
@@ -4714,6 +4773,17 @@ def apply_duplicates(vault: Path, notes: list[Note], report: dict, date: str) ->
 def apply_broken_links(vault: Path, notes: list[Note], report: dict) -> None:
     by_path = {note.path: note for note in notes}
     for item in report["broken_links"]:
+        if item["status"] == "handle":
+            note = by_path[item["source"]]
+            if note.protected:
+                report["skipped_uncertain"].append({"type": "protected_broken_link", "path": note.path})
+                continue
+            text = note.abs_path.read_text(encoding="utf-8")
+            new_text = strip_wikilink_to_plain(text, item["link"])
+            if new_text != text:
+                note.abs_path.write_text(new_text, encoding="utf-8")
+                report["applied"]["broken_links"].append({"source": note.path, "old": item["link"], "new": "(plain text)"})
+            continue
         if item["status"] != "unique":
             continue
         note = by_path[item["source"]]
@@ -4741,6 +4811,42 @@ def apply_empty_stubs(vault: Path, report: dict) -> None:
     not auto-deleted — manual review is needed to find the correct target.
     """
     for item in report.get("empty_stubs", []):
+        if item["status"] == "handle_stub":
+            # Causal wikilinks are handle-wikilinks ([[ @handle ]]) with no real
+            # target note: downgrade them to plain text, then delete the 0-byte
+            # stub so Obsidian no longer shows a grey dot.
+            unresolved_references = False
+            for ref in item["references"]:
+                source_note_path = vault / ref["source"]
+                if not source_note_path.exists():
+                    unresolved_references = True
+                    report["skipped_uncertain"].append(
+                        {"type": "missing_stub_reference", "stub": item["stub"], "source": ref["source"]}
+                    )
+                    continue
+                if ref["source"] in set(report.get("protected_paths", [])):
+                    unresolved_references = True
+                    report["skipped_uncertain"].append(
+                        {"type": "protected_stub_reference", "stub": item["stub"], "source": ref["source"]}
+                    )
+                    continue
+                text = source_note_path.read_text(encoding="utf-8")
+                new_text = strip_wikilink_to_plain(text, ref["link"])
+                if new_text != text:
+                    source_note_path.write_text(new_text, encoding="utf-8")
+            if unresolved_references:
+                continue
+            stub_path = vault / item["stub"]
+            if stub_path.exists():
+                completed = run_git(vault, ["ls-files", "--error-unmatch", item["stub"]])
+                if completed.returncode == 0:
+                    run_git(vault, ["rm", "-f", item["stub"]])
+                else:
+                    stub_path.unlink()
+            report["applied"]["empty_stubs"].append(
+                {"stub": item["stub"], "target": None, "action": "handle_downgrade"}
+            )
+            continue
         if item["status"] != "fixable":
             report["skipped_uncertain"].append({"type": "unfixable_stub", **item})
             continue
@@ -4973,7 +5079,7 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
         "verification": {},
     }
     for item in report["broken_links"]:
-        if item["status"] != "unique":
+        if item["status"] not in ("unique", "handle"):
             report["skipped_uncertain"].append({"type": "ambiguous_broken_link", **item})
     for item in report["invalid_fingerprints"]:
         report["skipped_uncertain"].append({"type": "stale_or_invalid_fingerprint", **item})
@@ -5082,7 +5188,7 @@ def refresh_report_findings(vault: Path, report: dict, include_structure: bool =
     report["report_only"]["synthesis_candidates"] = report["synthesis_candidates"]
     report["report_only"]["restatement_candidates"] = report["restatement_candidates"]
     for item in report["broken_links"]:
-        if item["status"] != "unique":
+        if item["status"] not in ("unique", "handle"):
             skipped = {"type": "ambiguous_broken_link", **item}
             if skipped not in report["skipped_uncertain"]:
                 report["skipped_uncertain"].append(skipped)

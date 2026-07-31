@@ -74,12 +74,69 @@ def strip_frontmatter(text: str) -> str:
     return text
 
 
+def extract_frontmatter(text: str) -> str:
+    """Return the leading YAML frontmatter block including the --- fences, or ''."""
+    if not text.startswith("---\n"):
+        return ""
+    end = text.find("\n---", 4)
+    if end == -1:
+        return ""
+    return text[:end + 4]
+
+
+def check_frontmatter_authors(text: str, rel: str) -> list[str]:
+    """Flag [[...]] wikilinks in the frontmatter author field.
+
+    Authors must be plain text. Upstream clippers may wrap social handles as
+    wikilinks (author: ["[[@Vercantez]]"]); such a wikilink points to a
+    non-existent @handle.md and becomes an unresolved graph node whose click
+    creates a 0-byte stub. verify_wikilinks strips the whole frontmatter for
+    content-link checks, so author wikilinks slip through - this catches them.
+    """
+    fm = extract_frontmatter(text)
+    if not fm:
+        return []
+    errors: list[str] = []
+    lines = fm.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = re.match(r"^author:\s*(.*)$", line)
+        if not m:
+            i += 1
+            continue
+        inline = m.group(1).strip()
+        if inline:
+            if "[[" in inline and "]]" in inline:
+                errors.append(
+                    f"{rel}: author field contains wikilink {inline}; "
+                    f"author must be plain text, not [[...]]"
+                )
+            i += 1
+            continue
+        # block list: consume following indented "  - item" lines
+        i += 1
+        while i < len(lines):
+            item_match = re.match(r"^\s+-\s+(.*)$", lines[i])
+            if not item_match:
+                break
+            item = item_match.group(1).strip()
+            if "[[" in item and "]]" in item:
+                errors.append(
+                    f"{rel}: author field contains wikilink {item}; "
+                    f"author must be plain text, not [[...]]"
+                )
+            i += 1
+    return errors
+
+
 def verify_file(rel: str, vault: Path, exact: set[str], approx: dict[str, list[str]]) -> list[str]:
     path = vault / rel
     if not path.is_file():
         return [f"{rel}: file not found"]
-    text = strip_frontmatter(path.read_text(encoding="utf-8"))
-    errors: list[str] = []
+    raw = path.read_text(encoding="utf-8")
+    errors: list[str] = check_frontmatter_authors(raw, rel)
+    text = strip_frontmatter(raw)
     seen: set[str] = set()
     for target in extract_wikilinks(text):
         if target in seen:

@@ -342,6 +342,30 @@ def frontmatter_string(frontmatter: dict[str, object], key: str) -> str:
     return value if isinstance(value, str) else ""
 
 
+def clean_author_value(value: object) -> object:
+    """Strip [[...]] wikilink wrapping from author field values.
+
+    Upstream clippers (e.g. Obsidian Web Clipper) sometimes wrap social
+    handles as wikilinks: ``author: ["[[@Vercantez]]"]``. A wikilink pointing
+    to a non-existent ``@handle.md`` note becomes an unresolved graph node
+    (grey dot); clicking it auto-creates a 0-byte stub. Authors must be plain
+    text. Returns a list for list input, a string for string input.
+    """
+    def _clean_one(item: object) -> str:
+        if not isinstance(item, str):
+            return ""
+        text = item.strip()
+        m = re.match(r"^\[\[(.+)\]\]$", text, re.DOTALL)
+        if m:
+            text = m.group(1)
+        text = text.split("|", 1)[0].split("#", 1)[0].strip()
+        return text
+
+    if isinstance(value, list):
+        return [c for c in (_clean_one(v) for v in value) if c]
+    return _clean_one(value)
+
+
 def normalized_url_value(value: str) -> str:
     if value.startswith(("http://", "https://")):
         return normalize_url(value)
@@ -916,7 +940,12 @@ def encoding_plan(vault: Path, candidates: list[Candidate], index: dict) -> dict
             recommended_frontmatter["source"] = normalized_url_value(source)
         if candidate.source_fingerprint:
             recommended_frontmatter["source_fingerprint"] = candidate.source_fingerprint
-        for key in ("author", "published", "description"):
+        author_value = source_frontmatter.get("author")
+        if author_value is not None:
+            cleaned_author = clean_author_value(author_value)
+            if cleaned_author:
+                recommended_frontmatter["author"] = cleaned_author
+        for key in ("published", "description"):
             value = frontmatter_string(source_frontmatter, key)
             if value:
                 recommended_frontmatter[key] = value
