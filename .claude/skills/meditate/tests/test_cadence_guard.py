@@ -157,6 +157,117 @@ class CadenceGuardTest(unittest.TestCase):
         self.assertEqual([], summary["unauthorized_synthesis_paths"])
         self.assertEqual([], summary["unauthorized_restatement_paths"])
 
+    def test_audit_weekly_restructuring_rejects_invalid_or_partial_marker_output(self) -> None:
+        module = load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            git_init(vault)
+            anchor = vault / "Projects" / "Example.md"
+            write_note(anchor, "Example", "# Example\n\nHand-written context.\n")
+            write_note(vault / "Projects" / "Example" / "Design Baseline.md", "Design Baseline")
+            write_note(vault / "Projects" / "Example" / "Design Revision.md", "Design Revision")
+            write_note(vault / "Projects" / "Other.md", "Other", "# Other")
+            git_commit(vault, "initial", "2026-07-06T10:00:00")
+
+            anchor.write_text(
+                anchor.read_text(encoding="utf-8")
+                + """
+Manual change outside the generated marker.
+
+<!-- BEGIN: knowledge-restructuring cluster=kr-a1b2c3d4 -->
+- 覆盖材料：2 篇；来源集：sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff；重构日期：2026-07-06
+
+### 当前有效理解
+- K-01：This statement cites a missing source. 证据：[[Missing Source]]。
+<!-- END: knowledge-restructuring -->
+""",
+                encoding="utf-8",
+            )
+            git_commit(vault, "invalid weekly restructuring", "2026-07-06T10:10:00")
+
+            summary = module.audit_weekly_semantic_changes(
+                vault,
+                {
+                    "synthesis_candidates": [],
+                    "restatement_candidates": [],
+                    "restructuring_candidates": [
+                        {
+                            "cluster_id": "kr-a1b2c3d4",
+                            "anchor_path": "Projects/Example.md",
+                            "source_set_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                            "action": "refresh_anchor",
+                            "confidence": "high",
+                        },
+                        {
+                            "cluster_id": "kr-b1c2d3e4",
+                            "anchor_path": "Projects/Other.md",
+                            "source_set_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+                            "action": "refresh_anchor",
+                            "confidence": "high",
+                        },
+                    ],
+                },
+                head_commit(vault),
+            )
+
+        self.assertEqual(["Projects/Example.md"], summary["restructuring_paths"])
+        self.assertEqual([], summary["unauthorized_restructuring_paths"])
+        self.assertEqual(["Projects/Example.md"], summary["marker_boundary_violations"])
+        self.assertEqual(["Projects/Example.md"], summary["digest_mismatches"])
+        self.assertEqual(["Projects/Example.md"], summary["invalid_source_links"])
+        self.assertEqual(["kr-b1c2d3e4"], summary["missing_restructuring_clusters"])
+
+    def test_audit_weekly_staged_restructuring_accepts_every_valid_target(self) -> None:
+        module = load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            git_init(vault)
+            anchor = vault / "Projects" / "Example.md"
+            write_note(anchor, "Example", "# Example")
+            write_note(vault / "Projects" / "Example" / "Design Baseline.md", "Design Baseline")
+            write_note(vault / "Projects" / "Example" / "Design Revision.md", "Design Revision")
+            git_commit(vault, "initial", "2026-07-06T10:00:00")
+
+            digest = "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+            anchor.write_text(
+                anchor.read_text(encoding="utf-8")
+                + f"""
+
+<!-- BEGIN: knowledge-restructuring cluster=kr-c1d2e3f4 -->
+- 覆盖材料：2 篇；来源集：{digest}；重构日期：2026-07-06
+
+### 当前有效理解
+- K-01：The revised design preserves the source history. 证据：[[Design Baseline]]。
+<!-- END: knowledge-restructuring -->
+""",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "Projects/Example.md"], cwd=vault, check=True)
+            summary = module.audit_weekly_staged_changes(
+                vault,
+                {
+                    "synthesis_candidates": [],
+                    "restatement_candidates": [],
+                    "restructuring_candidates": [
+                        {
+                            "cluster_id": "kr-c1d2e3f4",
+                            "anchor_path": "Projects/Example.md",
+                            "source_set_digest": digest,
+                            "action": "refresh_anchor",
+                            "confidence": "high",
+                        }
+                    ],
+                },
+            )
+
+        self.assertEqual(["Projects/Example.md"], summary["restructuring_paths"])
+        self.assertEqual([], summary["unauthorized_restructuring_paths"])
+        self.assertEqual([], summary["marker_boundary_violations"])
+        self.assertEqual([], summary["digest_mismatches"])
+        self.assertEqual([], summary["invalid_source_links"])
+        self.assertEqual([], summary["invalid_knowledge_entries"])
+        self.assertEqual([], summary["missing_restructuring_clusters"])
+
     def test_update_latest_log_semantic_fields_patches_only_latest_entry(self) -> None:
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp:
@@ -176,13 +287,13 @@ commit: 无
                 encoding="utf-8",
             )
 
-            module.update_latest_log_semantic_fields(log_path, synthesis_count=2, restatement_count=1)
+            module.update_latest_log_semantic_fields(log_path, synthesis_count=2, restatement_count=1, restructuring_count=3)
 
             text = log_path.read_text(encoding="utf-8")
 
         self.assertIn("- 语义综合：9", text)
         self.assertIn("- 再巩固：8", text)
-        self.assertIn("## 2026-07-06 auto\n- 范围：Resources\n- 语义综合：2\n- 再巩固：1\ncommit: 无", text)
+        self.assertIn("## 2026-07-06 auto\n- 范围：Resources\n- 语义综合：2\n- 再巩固：1\n- 知识重构：3\ncommit: 无", text)
 
 
 if __name__ == "__main__":

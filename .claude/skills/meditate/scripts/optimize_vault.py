@@ -42,6 +42,23 @@ OWNERSHIP_RELATIONS_BEGIN = "<!-- BEGIN: ownership-relations -->"
 OWNERSHIP_RELATIONS_END = "<!-- END: ownership-relations -->"
 SYNTHESIS_BEGIN = "<!-- BEGIN: synthesis -->"
 SYNTHESIS_END = "<!-- END: synthesis -->"
+KNOWLEDGE_RESTRUCTURING_BEGIN_RE = re.compile(
+    r"<!-- BEGIN: knowledge-restructuring cluster=(?P<cluster_id>kr-[0-9a-f]+) -->"
+)
+KNOWLEDGE_RESTRUCTURING_END = "<!-- END: knowledge-restructuring -->"
+KNOWLEDGE_RESTRUCTURING_DIGEST_RE = re.compile(r"来源集：(?P<digest>sha256:[0-9a-f]{64})")
+RESTRUCTURING_MIN_MEMBERS = 3
+RESTRUCTURING_MAX_MEMBERS = 12
+RESTRUCTURING_MIN_SHARED_CONCEPTS = 3
+RESTRUCTURING_REFINEMENT_RE = re.compile(
+    r"\b(refine[sd]?|revision|revised|update[ds]?|amend(?:ed|ment)?)\b|修订|更新|细化",
+    re.IGNORECASE,
+)
+RESTRUCTURING_SUPERSEDES_RE = re.compile(
+    r"\b(supersed(?:e|ed|es|ing)|replace[ds]?|deprecat(?:e|ed|es|ing))\b|取代|替代|废弃",
+    re.IGNORECASE,
+)
+RESTRUCTURING_CONFLICT_RE = re.compile(r"\b(conflict(?:s|ing|ed)?|contradict(?:s|ed|ing)?)\b|冲突|矛盾", re.IGNORECASE)
 FIXED_REPORT_DIR = Path(os.environ.get("MEDITATE_TEST_REPORT_DIR") or tempfile.gettempdir()).resolve()
 FIXED_JSON_REPORT = FIXED_REPORT_DIR / "meditate.json"
 FIXED_MARKDOWN_REPORT = FIXED_REPORT_DIR / "meditate.md"
@@ -411,6 +428,13 @@ def source_body_for_hash(text: str) -> str:
     i = 0
     while i < len(lines):
         stripped = lines[i].strip()
+        if KNOWLEDGE_RESTRUCTURING_BEGIN_RE.fullmatch(stripped):
+            i += 1
+            while i < len(lines) and lines[i].strip() != KNOWLEDGE_RESTRUCTURING_END:
+                i += 1
+            if i < len(lines):
+                i += 1
+            continue
         marker_end = {
             RESOURCE_INDEX_BEGIN: RESOURCE_INDEX_END,
             OWNERSHIP_INDEX_BEGIN: OWNERSHIP_INDEX_END,
@@ -2394,7 +2418,7 @@ def projects_structure_candidates(
     - project_note_rehome: a content note under Projects/<dir>/ whose stem
       begins with a different ownership project stem rehomes to
       Projects/<project>/ (or Projects/<project>/<sub>/ when a matching
-      subdirectory exists), e.g. proj review reports under integration-project/.
+      subdirectory exists), e.g. spec-runner review reports under primary-project/.
     """
     safety_notes = all_notes if all_notes is not None else notes
     owners = projects_ownership_notes(notes)
@@ -3695,6 +3719,359 @@ def restatement_candidates(vault: Path, notes: list[Note]) -> list[dict]:
     return candidates
 
 
+def is_restructuring_material(note: Note) -> bool:
+    """Return whether a note can be source material for knowledge restructuring.
+
+    Existing duplicate handling deliberately treats only Resources / Archive
+    references as material. Deep restructuring also needs the history captured
+    below a Project or Area directory, while keeping ownership notes and indexes
+    out of their own source cluster.
+    """
+    if note_kind(note) in {"area", "project", "index"}:
+        return False
+    parts = Path(note.path).parts
+    if note.path.startswith("Resources/"):
+        return is_material_note(note)
+    return len(parts) >= 3 and parts[0] in {"Projects", "Areas"}
+
+
+def restructuring_shared_concepts(left: Note, right: Note) -> list[str]:
+    """Return stable, source-material concepts that both notes explicitly carry."""
+    overlap = note_concept_counts(left) & note_concept_counts(right)
+    candidates = [
+        term
+        for term in overlap
+        if meaningful_concept_token(term) and concept_can_drive_structure(term)
+    ]
+    return sorted(candidates, key=lambda term: (-overlap[term], term))[:8]
+
+
+def restructuring_link_direction(source: Note, target: Note) -> bool:
+    return note_links_to_target(source, target)
+
+
+def restructuring_relation(left: Note, right: Note, shared_concepts: list[str]) -> dict | None:
+    """Classify a pair only from explicit source / graph / concept evidence."""
+    if len(shared_concepts) < RESTRUCTURING_MIN_SHARED_CONCEPTS:
+        return None
+
+    left_text = source_body_for_hash(note_text(left))
+    right_text = source_body_for_hash(note_text(right))
+    common_urls = sorted(set(left.normalized_urls) & set(right.normalized_urls))
+    same_source = bool(common_urls) or content_fingerprint(left_text) == content_fingerprint(right_text)
+    right_links_left = restructuring_link_direction(right, left)
+    left_links_right = restructuring_link_direction(left, right)
+    evidence = [f"shared_concepts:{','.join(shared_concepts[:5])}"]
+    if common_urls:
+        evidence.append("same_normalized_url")
+    if same_source and not common_urls:
+        evidence.append("same_source_material")
+    if right_links_left or left_links_right:
+        evidence.append("explicit_link")
+
+    if same_source:
+        return {"from": left.path, "to": right.path, "kind": "equivalent", "evidence": evidence}
+    if RESTRUCTURING_CONFLICT_RE.search(left_text) or RESTRUCTURING_CONFLICT_RE.search(right_text):
+        return {"from": left.path, "to": right.path, "kind": "conflicts", "evidence": evidence}
+    if right_links_left:
+        if RESTRUCTURING_SUPERSEDES_RE.search(right_text):
+            kind = "supersedes"
+        elif RESTRUCTURING_REFINEMENT_RE.search(right_text):
+            kind = "refines"
+        else:
+            kind = "complements"
+        return {"from": left.path, "to": right.path, "kind": kind, "evidence": evidence}
+    if left_links_right:
+        if RESTRUCTURING_SUPERSEDES_RE.search(left_text):
+            kind = "supersedes"
+        elif RESTRUCTURING_REFINEMENT_RE.search(left_text):
+            kind = "refines"
+        else:
+            kind = "complements"
+        return {"from": right.path, "to": left.path, "kind": kind, "evidence": evidence}
+    return {"from": left.path, "to": right.path, "kind": "complements", "evidence": evidence}
+
+
+def restructuring_scope_groups(notes: list[Note]) -> list[dict]:
+    """Build exclusive Project, Area, and Resource-topic material scopes."""
+    by_path = {note.path: note for note in notes}
+    groups: list[dict] = []
+
+    project_members: dict[str, list[Note]] = defaultdict(list)
+    area_directory_members: dict[str, list[Note]] = defaultdict(list)
+    for note in notes:
+        if not is_restructuring_material(note):
+            continue
+        parts = Path(note.path).parts
+        if len(parts) >= 3 and parts[0] == "Projects":
+            project_members[parts[1]].append(note)
+        elif len(parts) >= 3 and parts[0] == "Areas":
+            area_directory_members[parts[1]].append(note)
+
+    for name, members in sorted(project_members.items()):
+        groups.append(
+            {
+                "scope": f"Projects/{name}",
+                "anchor_path": f"Projects/{name}.md",
+                "anchor": by_path.get(f"Projects/{name}.md"),
+                "members": sorted(members, key=lambda item: item.path),
+            }
+        )
+    for name, members in sorted(area_directory_members.items()):
+        groups.append(
+            {
+                "scope": f"Areas/{name}",
+                "anchor_path": f"Areas/{name}.md",
+                "anchor": by_path.get(f"Areas/{name}.md"),
+                "members": sorted(members, key=lambda item: item.path),
+            }
+        )
+
+    area_owners = [note for note in notes if note.path.startswith("Areas/") and is_ownership_note(note)]
+    area_members: dict[str, list[Note]] = defaultdict(list)
+    for note in notes:
+        if not (note.path.startswith("Resources/") and is_restructuring_material(note)):
+            continue
+        matches = [owner for owner in area_owners if note_links_to_target(note, owner)]
+        if len(matches) == 1:
+            area_members[matches[0].path].append(note)
+
+    area_assigned: set[str] = set()
+    for anchor_path, members in sorted(area_members.items()):
+        if len(members) < RESTRUCTURING_MIN_MEMBERS:
+            continue
+        area_assigned.update(note.path for note in members)
+        groups.append(
+            {
+                "scope": anchor_path.removesuffix(".md"),
+                "anchor_path": anchor_path,
+                "anchor": by_path[anchor_path],
+                "members": sorted(members, key=lambda item: item.path),
+            }
+        )
+
+    resource_members: dict[str, list[Note]] = defaultdict(list)
+    for note in notes:
+        topic = resource_topic_name(note.path)
+        if topic and is_restructuring_material(note) and note.path not in area_assigned:
+            resource_members[topic].append(note)
+    for topic, members in sorted(resource_members.items()):
+        anchor_path = f"Resources/{topic}/README.md"
+        groups.append(
+            {
+                "scope": f"Resources/{topic}",
+                "anchor_path": anchor_path,
+                "anchor": by_path.get(anchor_path),
+                "members": sorted(members, key=lambda item: item.path),
+            }
+        )
+    return groups
+
+
+def restructuring_components(members: list[Note]) -> list[tuple[list[Note], list[dict]]]:
+    """Return connected components whose edges have the dual evidence relation."""
+    by_path = {note.path: note for note in members}
+    adjacency: dict[str, set[str]] = defaultdict(set)
+    relations: list[dict] = []
+    for index, left in enumerate(members):
+        for right in members[index + 1 :]:
+            relation = restructuring_relation(left, right, restructuring_shared_concepts(left, right))
+            if relation is None:
+                continue
+            relations.append(relation)
+            adjacency[left.path].add(right.path)
+            adjacency[right.path].add(left.path)
+
+    components: list[tuple[list[Note], list[dict]]] = []
+    remaining = set(adjacency)
+    while remaining:
+        seed = min(remaining)
+        pending = [seed]
+        component_paths: set[str] = set()
+        while pending:
+            current = pending.pop()
+            if current in component_paths:
+                continue
+            component_paths.add(current)
+            pending.extend(sorted(adjacency[current] - component_paths, reverse=True))
+        remaining -= component_paths
+        component_relations = [
+            relation
+            for relation in relations
+            if relation["from"] in component_paths and relation["to"] in component_paths
+        ]
+        components.append(
+            (
+                [by_path[path] for path in sorted(component_paths)],
+                sorted(component_relations, key=lambda item: (item["from"], item["to"], item["kind"])),
+            )
+        )
+    return components
+
+
+def restructuring_cluster_id(scope: str, member_paths: list[str]) -> str:
+    payload = json.dumps({"scope": scope, "members": member_paths}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "kr-" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def restructuring_source_set_digest(member_notes: list[Note], relations: list[dict]) -> str:
+    payload = {
+        "members": [
+            {"path": note.path, "source": content_fingerprint(source_body_for_hash(note_text(note)))}
+            for note in sorted(member_notes, key=lambda item: item.path)
+        ],
+        "relations": [
+            {
+                "from": relation["from"],
+                "to": relation["to"],
+                "kind": relation["kind"],
+                "evidence": relation["evidence"],
+            }
+            for relation in relations
+        ],
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def restructuring_marker_digests(text: str) -> dict[str, str]:
+    """Return complete existing marker source digests by stable cluster identifier."""
+    digests: dict[str, str] = {}
+    for match in KNOWLEDGE_RESTRUCTURING_BEGIN_RE.finditer(text):
+        end = text.find(KNOWLEDGE_RESTRUCTURING_END, match.end())
+        if end == -1:
+            continue
+        digest_match = KNOWLEDGE_RESTRUCTURING_DIGEST_RE.search(text[match.end() : end])
+        if digest_match:
+            digests[match.group("cluster_id")] = digest_match.group("digest")
+    return digests
+
+
+def restructuring_wikilink_resolves(target: str, notes: list[Note]) -> bool:
+    """Resolve a source wikilink strictly to a real filename stem or path."""
+    if not target or is_handle_wikilink_target(target):
+        return True
+    if Path(target).suffix.lower() in SOURCE_EXTENSIONS:
+        return True
+    normalized_target = normalize_relpath(target)
+    path_candidates = {
+        normalize_relpath(note.path)
+        for note in notes
+    }
+    if normalized_target in path_candidates or f"{normalized_target}.md" in path_candidates:
+        return True
+    matches = [
+        note
+        for note in notes
+        if normalize_name(Path(note.path).stem) == normalize_name(target)
+    ]
+    return len(matches) == 1
+
+
+def restructuring_unresolved_member_links(members: list[Note], notes: list[Note]) -> list[str]:
+    unresolved = {
+        f"{note.path}::{target}"
+        for note in members
+        for target in note.wikilinks
+        if not restructuring_wikilink_resolves(target, notes)
+    }
+    return sorted(unresolved)
+
+
+def restructuring_candidate(
+    scope_group: dict,
+    members: list[Note],
+    relations: list[dict],
+    protected: set[str],
+    all_notes: list[Note],
+    initial_blockers: list[str] | None = None,
+) -> dict:
+    member_paths = [note.path for note in members]
+    cluster_id = restructuring_cluster_id(scope_group["scope"], member_paths)
+    source_set_digest = restructuring_source_set_digest(members, relations)
+    anchor = scope_group.get("anchor")
+    anchor_path = scope_group["anchor_path"]
+    blockers = list(initial_blockers or [])
+    if anchor is None:
+        blockers.append("anchor_missing")
+        marker_digests: dict[str, str] = {}
+    else:
+        marker_digests = restructuring_marker_digests(note_text(anchor))
+    if is_protected(anchor_path, protected):
+        blockers.append("anchor_protected")
+    if any(note.protected or is_protected(note.path, protected) for note in members):
+        blockers.append("member_protected")
+    if any(not note.fingerprint_valid for note in members):
+        blockers.append("source_invalid")
+    unresolved_links = restructuring_unresolved_member_links(members, all_notes)
+    if unresolved_links:
+        blockers.append("source_link_missing")
+    if len(members) > RESTRUCTURING_MAX_MEMBERS:
+        blockers.append("cluster_too_large")
+
+    semantic_evidence = sorted(
+        {
+            evidence
+            for relation in relations
+            for evidence in relation["evidence"]
+            if evidence.startswith("shared_concepts:")
+        }
+    )
+    last_digest = marker_digests.get(cluster_id)
+    return {
+        "cluster_id": cluster_id,
+        "scope": scope_group["scope"],
+        "anchor_path": anchor_path,
+        "member_paths": member_paths,
+        "relations": relations,
+        "evidence": {
+            "structural": [f"common_scope:{scope_group['scope']}", f"anchor:{anchor_path}"],
+            "semantic": semantic_evidence,
+        },
+        "source_set_digest": source_set_digest,
+        "last_restructured_digest": last_digest,
+        "action": "report_only" if blockers else "refresh_anchor",
+        "reason": "; ".join(blockers) if blockers else "unique anchor with structural and semantic evidence",
+        "confidence": "medium" if blockers else "high",
+        "blockers": sorted(blockers),
+        "unresolved_source_links": unresolved_links,
+    }
+
+
+def restructuring_candidates(vault: Path, notes: list[Note], protected: set[str]) -> list[dict]:
+    """Discover generic, candidate-bound knowledge clusters without mutating notes."""
+    candidates: list[dict] = []
+    for scope_group in restructuring_scope_groups(notes):
+        if len(scope_group["members"]) < RESTRUCTURING_MIN_MEMBERS:
+            continue
+        safe_components = [
+            (members, relations)
+            for members, relations in restructuring_components(scope_group["members"])
+            if len(members) >= RESTRUCTURING_MIN_MEMBERS
+        ]
+        if not safe_components:
+            candidates.append(
+                restructuring_candidate(
+                    scope_group,
+                    scope_group["members"],
+                    [],
+                    protected,
+                    notes,
+                    initial_blockers=["relation_ambiguous"],
+                )
+            )
+            continue
+        for members, relations in safe_components:
+            candidate = restructuring_candidate(scope_group, members, relations, protected, notes)
+            if (
+                candidate["action"] == "refresh_anchor"
+                and candidate["last_restructured_digest"] == candidate["source_set_digest"]
+            ):
+                continue
+            candidates.append(candidate)
+    return sorted(candidates, key=lambda item: (item["scope"], item["cluster_id"]))
+
+
 def coverage(notes: list[Note]) -> dict:
     distribution = Counter(note.path.split("/", 1)[0] for note in notes)
     return {
@@ -4983,6 +5360,7 @@ def append_log(vault: Path, report: dict, date: str) -> None:
         f"- 承接分化：{len(report['applied'].get('ownership_splits', []))}\n"
         "- 语义综合：0\n"
         "- 再巩固：0\n"
+        "- 知识重构：0\n"
         f"- 噪音清理：{len(report['applied'].get('content_noise', []))}\n"
         f"- 编码损坏报告：{len(report.get('report_only', {}).get('encoding_damage', []))}\n"
         "commit: 无\n"
@@ -5045,6 +5423,7 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
     owner_profiles = ownership_understanding_profiles(notes)
     synthesis = synthesis_candidates(vault, notes)
     restatement = restatement_candidates(vault, notes)
+    restructuring = restructuring_candidates(vault, notes, protected)
     report = {
         "scope": scopes,
         "coverage": coverage(notes),
@@ -5053,6 +5432,7 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
         "staleness_report": staleness,
         "synthesis_candidates": synthesis,
         "restatement_candidates": restatement,
+        "restructuring_candidates": restructuring,
         "duplicates": duplicate_groups(notes),
         "broken_links": broken_links(
             notes,
@@ -5121,6 +5501,7 @@ def build_report(vault: Path, scopes: list[str]) -> dict:
             "topic_relation_candidates": topic_relation_findings,
             "synthesis_candidates": synthesis,
             "restatement_candidates": restatement,
+            "restructuring_candidates": restructuring,
             "encoding_damage": [i for i in content_noise_items if i.get("kind") == "encoding_damage"],
             "projects_structure_candidates": projects_structure_findings,
         },
@@ -5177,6 +5558,7 @@ def refresh_report_findings(vault: Path, report: dict, include_structure: bool =
     report["staleness_report"] = staleness_report(vault, notes, retrieval_stats(vault, notes, days=180))
     report["synthesis_candidates"] = synthesis_candidates(vault, notes)
     report["restatement_candidates"] = restatement_candidates(vault, notes)
+    report["restructuring_candidates"] = restructuring_candidates(vault, notes, protected)
     safety_notes = structural_safety_notes(vault, report["scope"], protected, notes)
     report["duplicates"] = duplicate_groups(notes)
     report["broken_links"] = broken_links(
@@ -5236,6 +5618,7 @@ def refresh_report_findings(vault: Path, report: dict, include_structure: bool =
     report["report_only"]["topic_relation_candidates"] = report["understanding"]["topic_relation_candidates"]
     report["report_only"]["synthesis_candidates"] = report["synthesis_candidates"]
     report["report_only"]["restatement_candidates"] = report["restatement_candidates"]
+    report["report_only"]["restructuring_candidates"] = report["restructuring_candidates"]
     for item in report["broken_links"]:
         if item["status"] not in ("unique", "handle"):
             skipped = {"type": "ambiguous_broken_link", **item}
@@ -5454,6 +5837,11 @@ def markdown_report(report: dict) -> str:
         f"- `{item['path']}`：NUL {item.get('nul', 0)} 个；{item.get('suggestion', '')}"
         for item in report["report_only"].get("encoding_damage", [])
     ]
+    restructuring_candidate_lines = [
+        f"- `{item['cluster_id']}`：`{item['scope']}` → `{item['anchor_path']}`"
+        f"（{len(item['member_paths'])} 篇；{item['action']}；{item['reason']}）"
+        for item in report.get("restructuring_candidates", [])
+    ]
     lines = [
         "## 范围与扫描结果",
         f"- 范围：{', '.join(report['scope'])}",
@@ -5482,6 +5870,7 @@ def markdown_report(report: dict) -> str:
         f"- 疑似重复：{len(suspected) if suspected else '无'}",
         f"- 孤岛笔记：{len(report['orphan_notes']) if report['orphan_notes'] else '无'}",
         "- 重新理解补链候选：" + ("\n" + "\n".join(understanding_candidate_lines) if understanding_candidate_lines else "无"),
+        "- 知识重构候选：" + ("\n" + "\n".join(restructuring_candidate_lines) if restructuring_candidate_lines else "无可安全重构项"),
         "- 重新理解结构候选：" + ("\n" + "\n".join(structural_candidate_lines) if structural_candidate_lines else "无"),
         "- Resource topic 拆分判断：" + ("\n" + "\n".join(resource_split_decision_lines) if resource_split_decision_lines else "无"),
         "- Resource topic 关联候选：" + ("\n" + "\n".join(topic_relation_lines) if topic_relation_lines else "无"),

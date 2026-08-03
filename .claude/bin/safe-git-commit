@@ -35,9 +35,9 @@ def enforce_weekly_guard() -> int:
     except Exception as exc:  # pragma: no cover - defensive wrapper path
         print(f"safe-git-commit: unable to load weekly semantic guard: {exc}", file=sys.stderr)
         return 2
-    if summary["unauthorized_synthesis_paths"] or summary["unauthorized_restatement_paths"]:
+    if guard.weekly_guard_has_violations(summary):
         print(
-            "safe-git-commit: weekly semantic targets drifted from /tmp/meditate.json: "
+            f"safe-git-commit: weekly semantic targets drifted from {report_path}: "
             + guard.format_unauthorized_message(summary),
             file=sys.stderr,
         )

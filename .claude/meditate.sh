@@ -128,6 +128,7 @@ entry = (
     f"- 概念画像：0\n"
     f"- 语义综合：0\n"
     f"- 再巩固：0\n"
+    f"- 知识重构：0\n"
     f"- 结构建议：{links + broken + metadata + structural + profiles}\n"
     "commit: 无\n"
 )
@@ -144,11 +145,9 @@ run_deterministic_apply_commit() {
     return 0
   fi
   print -r -- "meditate: running deterministic apply-safe directly"
-  if [[ "$CADENCE" == "weekly" ]]; then
-    export MEDITATE_WEEKLY_REPORT="$REPORT_JSON"
-  else
-    unset MEDITATE_WEEKLY_REPORT 2>/dev/null || true
-  fi
+  # Deterministic maintenance is a separate commit. Do not apply the deep
+  # weekly marker guard until the report has been refreshed afterwards.
+  unset MEDITATE_WEEKLY_REPORT 2>/dev/null || true
   if ! MEDITATE_LOG_TRIGGER=auto .claude/bin/meditate-apply-safe "$DATE" --progress; then
     print -u2 -- "meditate failed: meditate-apply-safe wrapper exited non-zero"
     return 2
@@ -243,7 +242,12 @@ actionable += sum(1 for item in report.get("understanding", {}).get("ownership_a
 actionable += sum(1 for item in report.get("understanding", {}).get("ownership_area_profile_gaps") or [] if item.get("fixable"))
 actionable += sum(1 for item in report.get("understanding", {}).get("ownership_structure_candidates") or [] if item.get("fixable"))
 actionable += sum(1 for item in report.get("understanding", {}).get("ownership_split_candidates") or [] if item.get("fixable"))
-deep = len(report.get("synthesis_candidates") or []) + len(report.get("restatement_candidates") or [])
+restructuring = sum(
+    1
+    for item in report.get("restructuring_candidates") or []
+    if item.get("action") == "refresh_anchor" and item.get("confidence") == "high"
+)
+deep = len(report.get("synthesis_candidates") or []) + len(report.get("restatement_candidates") or []) + restructuring
 print(f"{actionable} {deep}")
 PY
 )
@@ -256,28 +260,39 @@ if (( protected_count > MEDITATE_MAX_PROTECTED_PATHS )); then
   exit 0
 fi
 
-if (( actionable_count == 0 )) && { [[ "$CADENCE" == "nightly" ]] || (( deep_count == 0 )); }; then
+if [[ "$CADENCE" == "nightly" ]] && (( actionable_count == 0 )) && (( deep_count == 0 )); then
   print -r -- "meditate: no actionable items"
   append_scan_log
   exit 0
 fi
 
 skip_headless=0
-if (( deep_count == 0 )); then
+if [[ "$CADENCE" == "weekly" ]]; then
+  # Finish low-risk deterministic maintenance first. The deep stage must bind
+  # to a fresh report so marker-only commits never include unrelated changes.
+  run_deterministic_apply_commit
+  direct_exit=$?
+  if (( direct_exit != 0 )); then
+    exit "$direct_exit"
+  fi
+  if ! .claude/bin/meditate-scan; then
+    print -u2 -- "meditate failed: unable to refresh weekly report after deterministic maintenance"
+    exit 2
+  fi
+  WEEKLY_GUARD_PROMPT=$(python3 "$CADENCE_GUARD_SCRIPT" weekly-prompt --report "$REPORT_JSON")
+  if (( $? != 0 )); then
+    print -u2 -- "meditate failed: unable to load weekly semantic guard prompt"
+    exit 2
+  fi
+  CADENCE_PROMPT="本次为 weekly 深度周期：确定性 apply-safe 已完成且 report 已刷新。必须处理 $REPORT_JSON 中全部高置信、可写 restructuring_candidates，不得设置数量上限；每个候选只能更新其 anchor 内完整的 knowledge-restructuring marker。不得运行 apply-safe 或混入其他笔记改动。若候选为空或全部被安全门拦截，记录 无可安全重构项 及逐簇 blocker，不生成内容也不提交部分结果。兼容的 synthesis_candidates 和 restatement_candidates 同样没有数量上限，但仅可写 JSON report 明确列出的既有 marker 区域。$WEEKLY_GUARD_PROMPT"
+  export MEDITATE_WEEKLY_REPORT="$REPORT_JSON"
+elif (( deep_count == 0 )); then
   run_deterministic_apply_commit
   direct_exit=$?
   if (( direct_exit != 0 )); then
     exit "$direct_exit"
   fi
   skip_headless=1
-elif [[ "$CADENCE" == "weekly" ]]; then
-  WEEKLY_GUARD_PROMPT=$(python3 "$CADENCE_GUARD_SCRIPT" weekly-prompt --report "$REPORT_JSON")
-  if (( $? != 0 )); then
-    print -u2 -- "meditate failed: unable to load weekly semantic guard prompt"
-    exit 2
-  fi
-  CADENCE_PROMPT="本次为 weekly 深度周期：先运行 apply-safe，再处理 $REPORT_JSON 中最多 2 个 synthesis_candidates 和最多 3 个 restatement_candidates。所有语义生成必须限定在 synthesis marker block 或 '### 再巩固 <YYYY-MM-DD>' append-only 区域。$WEEKLY_GUARD_PROMPT"
-  export MEDITATE_WEEKLY_REPORT="$REPORT_JSON"
 else
   CADENCE_PROMPT="本次为 nightly 轻量周期：运行 apply-safe，优先处理补链、去重、topic index、ownership、staleness 降权等低风险改动，不做大范围语义重写。"
   unset MEDITATE_WEEKLY_REPORT 2>/dev/null || true
@@ -302,6 +317,7 @@ if (( skip_headless == 0 )); then
 
   semantic_synthesis_count=0
   semantic_restatement_count=0
+  semantic_restructuring_count=0
   if [[ "$CADENCE" == "weekly" ]]; then
     after_head=""
     if git rev-parse --verify HEAD >/dev/null 2>&1; then
@@ -322,13 +338,15 @@ import json
 import os
 
 summary = json.loads(os.environ["AUDIT_JSON"])
-print(f"{summary['synthesis_count']} {summary['restatement_count']}")
+print(f"{summary['synthesis_count']} {summary['restatement_count']} {len(summary['restructuring_paths'])}")
 PY
 )
-      semantic_synthesis_count=${semantic_counts%% *}
-      semantic_restatement_count=${semantic_counts##* }
+      semantic_count_array=(${=semantic_counts})
+      semantic_synthesis_count=${semantic_count_array[1]}
+      semantic_restatement_count=${semantic_count_array[2]}
+      semantic_restructuring_count=${semantic_count_array[3]}
     fi
-    if ! python3 "$CADENCE_GUARD_SCRIPT" patch-log --log .claude/meditate.log --synthesis-count "$semantic_synthesis_count" --restatement-count "$semantic_restatement_count"; then
+    if ! python3 "$CADENCE_GUARD_SCRIPT" patch-log --log .claude/meditate.log --synthesis-count "$semantic_synthesis_count" --restatement-count "$semantic_restatement_count" --restructuring-count "$semantic_restructuring_count"; then
       print -u2 -- "meditate failed: unable to patch weekly semantic counts into .claude/meditate.log"
       exit 2
     fi

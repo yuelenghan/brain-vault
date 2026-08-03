@@ -51,19 +51,21 @@ Prefer letting the script handle scanning, indexing, exact deduplication, broken
 Analysis mode (read-only):
 
 ```bash
+T=$(python3 -c 'import tempfile;print(tempfile.gettempdir())')
 python3 .claude/skills/meditate/scripts/optimize_vault.py \
   --mode scan \
-  --json /tmp/meditate.json \
-  --markdown /tmp/meditate.md
+  --json "$T/meditate.json" \
+  --markdown "$T/meditate.md"
 ```
 
 Safe-apply mode (deterministic low-risk changes only):
 
 ```bash
+T=$(python3 -c 'import tempfile;print(tempfile.gettempdir())')
 python3 .claude/skills/meditate/scripts/optimize_vault.py \
   --mode apply-safe \
-  --json /tmp/meditate.json \
-  --markdown /tmp/meditate.md \
+  --json "$T/meditate.json" \
+  --markdown "$T/meditate.md" \
   --date <YYYY-MM-DD> \
   --progress
 ```
@@ -80,9 +82,9 @@ python3 .claude/skills/meditate/scripts/optimize_vault.py \
 - When the user says "only analyze / only report", use `--mode scan` only.
 - When the user says "meditate" or "冥想 vault" and has not forbidden changes, you must prefer `--mode apply-safe`; the script does deterministic low-risk changes first.
 - When the user specifies a topic or directory, append one or more `--scope <directory>` to the script.
-- The script's JSON / Markdown output is fixed to `/tmp/meditate.json` and `/tmp/meditate.md`; do not pass other report paths, do not pass `--vault`, and run from the vault root.
-- The script's JSON output is the primary source of truth; before the final answer you must Read `/tmp/meditate.md` or the JSON summary.
-- The report also includes `retrieval_stats`, `staleness_report`, `synthesis_candidates`, and `restatement_candidates`. Treat these as part of the core meditate contract: retrieval feedback comes from `.claude/recall.log`, staleness is a report/apply-safe demotion signal only, and synthesis/restatement are deep-run inputs rather than blanket rewrite permission.
+- The script's JSON / Markdown output is fixed to `<tempfile.gettempdir()>/meditate.json` and `<tempfile.gettempdir()>/meditate.md` (resolved; `tempfile.gettempdir()` follows `$TMPDIR`, which on macOS is `/var/folders/.../T`, not `/tmp/`); do not pass other report paths, do not pass `--vault`, and run from the vault root.
+- The script's JSON output is the primary source of truth; before the final answer you must Read the Markdown report (`$T/meditate.md`) or the JSON summary.
+- The report also includes `retrieval_stats`, `staleness_report`, `synthesis_candidates`, `restatement_candidates`, and `restructuring_candidates`. Treat these as part of the core meditate contract: retrieval feedback comes from `.claude/recall.log`, staleness is a report/apply-safe demotion signal only, and deep semantic candidates are not blanket rewrite permission.
 - The script only trusts recomputed source-material fingerprints; `source_fingerprint` is the preferred strict field, while legacy `content_fingerprint` is accepted for backward compatibility and is not treated as a strict stale/invalid signal. If the report lists `invalid_fingerprints` / `stale_or_invalid_fingerprint`, do not auto-dedupe based on those stale frontmatter fingerprints — prefer to report or clean them manually.
 - After running the script, continue checking the report for orphan notes, ownership gaps, topic-index gaps, and high-confidence semantic link additions; as long as they are non-protected, clearly-evidenced, and small, fix them directly and record — do not stop at "suggestion".
 - If `apply-safe` produces no changes but there are many protected paths, do not misread it as failure; explain the script skipped them to protect pre-existing uncommitted changes, and give the next step: commit/clean those changes and rerun, or narrow scope with `--scope <directory>`.
@@ -112,7 +114,7 @@ The script `.claude/skills/meditate/scripts/optimize_vault.py`, together with it
 - Deterministically learning topic relations: when two Resource topics share stable concepts that are distinctive to that pair or to a small 3-topic cluster, report a cross-topic relation candidate with the shared concept evidence; under `apply-safe`, when both topic READMEs exist and are non-protected, write reciprocal generated `## 相关主题` marker blocks using `<!-- BEGIN: topic-relations -->` / `<!-- END: topic-relations -->`. These relation bullets must link to the actual target README path with an alias, e.g. `[[Resources/<topic>/README|<topic>]]`, not a bare directory-name wikilink. When both related Resource topics have auto-created/source-topic Area owners, also refresh reciprocal generated `## 相关承接` marker blocks using `<!-- BEGIN: ownership-relations -->` / `<!-- END: ownership-relations -->`, preserving the shared concept evidence and clearing stale generated relation bullets when current evidence disappears.
 - Preventing generated-section feedback loops: concept extraction uses the source-material view and ignores generated relationship/index/profile maintenance sections, so a newly-added `[[Area]]` link does not itself become false evidence for the next concept profile.
 - Deterministically re-understanding structure: when a material note's current title/body evidence points to a unique existing `Resources/<topic>/` title or alias, move the note with `git mv`; when two resource topics are equivalent by current topic names/aliases such as singular/plural variants, merge material notes into the canonical topic with `git mv`; when a note strongly overlaps a unique topic concept profile, re-home it by concept evidence even if the body does not spell the topic name; when all notes in a broad Resource topic share a more specific title-leading topic or title-contained concept topic, rename/re-home the material notes into that narrower `Resources/<topic>/`; when a broad Resource topic contains a stable, distinctive title-leading or title-contained concept subcluster and the best split is unique, move those notes into a new narrower `Resources/<subtopic>/` with `git mv`. Structural moves must also protect inbound path-qualified wikilinks: if a note linking to the old path has pre-existing uncommitted changes, the linking note is outside the requested `--scope`, or the target filename stem is not unique in the PARA index and therefore cannot be safely repaired to a bare wikilink, skip the move and report it instead of creating a broken link that cannot be safely repaired within the current run; otherwise repair in-scope path-qualified wikilinks to the moved note's filename stem during the structural move, preserving anchors and aliases.
-- Deterministically re-understanding Projects structure: when a top-level `Projects/<dir>/` directory name begins with an ownership project stem token and is not itself an ownership note stem, and `Projects/<project>/` exists, `apply-safe` merges it under `Projects/<project>/<dir>/` via `git mv`; when a content note under `Projects/<dir>/` has a stem beginning with a different ownership project stem, `apply-safe` rehomes it to `Projects/<project>/` or `Projects/<project>/<sub>/` when a matching subdirectory exists (e.g. proj review reports misplaced under `integration-project/`). Notes inside a merged directory move with it; bare wikilinks are unaffected (resolved by filename), path-qualified wikilinks are repaired to the filename stem, and plain-text `承接 Projects/...` path references in ownership notes are synced to the new paths.
+- Deterministically re-understanding Projects structure: when a top-level `Projects/<dir>/` directory name begins with an ownership project stem token and is not itself an ownership note stem, and `Projects/<project>/` exists, `apply-safe` merges it under `Projects/<project>/<dir>/` via `git mv`; when a content note under `Projects/<dir>/` has a stem beginning with a different ownership project stem, `apply-safe` rehomes it to `Projects/<project>/` or `Projects/<project>/<sub>/` when a matching subdirectory exists (e.g. spec-runner review reports misplaced under `primary-project/`). Notes inside a merged directory move with it; bare wikilinks are unaffected (resolved by filename), path-qualified wikilinks are repaired to the filename stem, and plain-text `承接 Projects/...` path references in ownership notes are synced to the new paths.
 - Reporting Resource topic split decisions: for broad topics, explain whether a stable title-leading or title-contained concept subcluster is safe to split, ambiguous, or below threshold, so skipped restructuring is auditable rather than silent.
 - Under `apply-safe`: metadata backfill, exact-duplicate `git mv` archival, unique broken-link repair, empty stub deletion, writing `.claude/meditate.log`.
 - Under `apply-safe`: topic-index creation/update for non-protected `Resources/<topic>/` directories with 3+ reference notes, including missing README creation, missing marker insertion, and stale marker block refresh. Resource-index ordering must reflect current salience and recent retrieval frequency, while dormant/stale notes are demoted to the tail and labeled `（休眠）`.
@@ -121,7 +123,33 @@ The script `.claude/skills/meditate/scripts/optimize_vault.py`, together with it
 - Deriving deterministic `staleness_report` candidates from last-modified age, inbound links, and recent retrieval counts; `apply-safe` may only update `last_relevance_check` and resource-index ordering, never delete notes.
 - Deriving deterministic `synthesis_candidates` when a topic has 5+ material notes and its README lacks a synthesis block or lags current coverage by 3+ materials.
 - Deriving deterministic `restatement_candidates` when a note already has `## 提炼` but related same-topic material added since the last `### 再巩固 <YYYY-MM-DD>` shares at least 3 stable concepts across 3+ peer notes.
+- Deriving deterministic generic `restructuring_candidates` from a unique Project, Area, or Resource-topic scope plus structural/source and semantic evidence. Each candidate contains its cluster id, unique natural anchor, members, generic relations, source-set digest, confidence, and explicit blockers; this discovery step never writes knowledge prose.
 - Generating a fixed-structure Markdown / JSON report, splitting `applied`, `report_only`, `skipped_uncertain`, `verification`.
+
+### 3.1 Weekly knowledge restructuring and compression
+
+知识重构与压缩 is a general semantic-memory layer, not a review-chain feature: repeated research, evolving plans, multi-round reviews, postmortems, and conflicting material all use the same generic relations (`equivalent`, `refines`, `supersedes`, `complements`, `conflicts`, `related_unknown`). Original notes always remain intact and traceable; only the anchor's generated `knowledge-restructuring` marker may change.
+
+- 深度生成只由 `meditate weekly` 触发. `scan`, `apply-safe`, `nightly`, and ordinary interactive `meditate` may discover and report candidates but must not generate a knowledge core.
+- A write-eligible cluster needs one unique existing natural anchor, a single scope, structural/source evidence plus at least three stable shared concepts, valid member source links, and no protected path. Missing/ambiguous anchors, protected members, invalid source links, oversized unsplittable clusters, or `related_unknown` relations remain report-only with their exact blocker (for example `anchor_protected`, `source_link_missing`, `relation_ambiguous`).
+- `conflicts` is not an auto-rejection: write it as an unresolved conflict with both sources; never select a winner from recency, majority, or model confidence.
+- A generated block must contain the report's exact source-set digest and only real filename-stem wikilinks. Every `K-*` claim has at least one source; superseded and conflict claims have at least two. The generated text must not invent completion state, causality, or a decision not supported by the source material.
+- `meditate weekly` first commits deterministic low-risk maintenance, refreshes the report, then processes **全部高置信、可写候选** in that refreshed report. There is no numerical cap and no partial deep commit: any eligible candidate without one valid marker update fails the whole weekly commit. If candidates are empty or every one is blocked, the stage completes with `无可安全重构项` and the per-cluster blockers, not a synthetic summary.
+- The only permitted generated form is a complete marker block in the candidate anchor. It may be replaced when the source-set digest changes; it must not modify handwritten anchor text or any member note body:
+
+```markdown
+<!-- BEGIN: knowledge-restructuring cluster=kr-... -->
+- 覆盖材料：N 篇；来源集：sha256:...；重构日期：YYYY-MM-DD
+
+### 当前有效理解
+- K-01：<source-supported claim>。证据：[[actual filename stem]]。
+
+### 未决冲突与待验证问题
+- K-02：<unresolved conflict>。证据：[[source A]]、[[source B]]。
+<!-- END: knowledge-restructuring -->
+```
+
+The shared cadence guard audits staged and committed output against the JSON report: allowed anchor and cluster, marker-only diff, exact digest, unique filename-stem links, minimum source counts, and complete coverage of all eligible clusters. Any violation blocks the commit and leaves the worktree for review.
 
 ### 4. Judgment still owned by the model
 
@@ -182,7 +210,7 @@ Beyond dedup and linking, check these low-risk optimizations:
 - **Orphan notes**: material notes with neither outbound nor inbound links — prefer adding 1-3 high-confidence links; when unconfirmable, report as an orphan candidate.
 - **Re-understanding pass**: each run rebuilds the note, topic, title, alias, source, link, concept, and ownership indexes. In `apply-safe`, exact explicit mentions and high-confidence ownership concept matches are appended to a `## 关联` section on the material note; for Area / Project ownership matches, a reciprocal `## 资料索引` back-link is added to the ownership note; stable unowned resource topics can grow into new Area notes with reciprocal links, those auto-created Areas keep learning through marker-based profile/material-index/relation refresh, equivalent auto-created Areas are merged/archived with incoming links rewritten, and broad auto-created Areas can split out stable child Areas when the current material cluster proves a distinct subtopic; topic README files get auditable generated `## 概念画像` and `## 相关主题` marker blocks; for topic, concept, stable title-leading subcluster, or stable title-contained concept subcluster evidence, the note and its referenced same-directory `source/` files are moved to the newly understood `Resources/<topic>/`, in-scope path-qualified wikilinks to the old path are repaired to the moved filename stem, and then links/indexes/fingerprints are recomputed.
 - **Naming and directory anomalies**: files clearly in the wrong topic, titles badly mismatched with paths, or one topic spread across multiple near-identical directories are auto-restructured when the script can prove a unique target. Equivalent topic directories are merged automatically; ambiguous topic splits/renames are skipped with evidence rather than silently guessed.
-- **Projects/ content misplacement**: a top-level `Projects/<dir>/` whose name begins with an ownership project stem but is not the ownership note's own same-name directory is merged under that project; a content note under `Projects/<dir>/` whose stem belongs to a different project is rehomed (with a matching subdirectory when one exists). The ownership note + same-name material directory pattern (e.g. `proj.md` + `proj/`) is the kept PARA pattern and is not restructured.
+- **Projects/ content misplacement**: a top-level `Projects/<dir>/` whose name begins with an ownership project stem but is not the ownership note's own same-name directory is merged under that project; a content note under `Projects/<dir>/` whose stem belongs to a different project is rehomed (with a matching subdirectory when one exists). The ownership note + same-name material directory pattern (e.g. `spec-runner.md` + `spec-runner/`) is the kept PARA pattern and is not restructured.
 - **frontmatter structure repair**: a note whose first line is not `---` (blockquote, blank line at top, or no frontmatter at all) is treated by Obsidian as having no frontmatter; for non-protected notes run `python3 .claude/skills/meditate/scripts/fix_frontmatter.py <file>` to repair the structure (move YAML to line 1, synthesize missing frontmatter, move a `> 内容指纹：` blockquote into `content_fingerprint`). The script also detects and fixes **double frontmatter** (garbled PDF content between two `---` blocks — merges the real later frontmatter to line 1 and removes noise) and **smart/curly quotes** (`“”‘’` → straight `""''`) in frontmatter values. After repair, Read the file to confirm frontmatter is on line 1 and the body is intact.
 - **frontmatter value validation**: the scan report's `invalid_frontmatter` lists notes whose `---` fences are on line 1 but have issues that break Obsidian properties: (a) an unquoted scalar value contains `: ` (colon+space), (b) values wrapped in smart/curly quotes (`“”‘’`) which YAML doesn't recognize as string delimiters. Both cause Obsidian to silently drop all properties / Dataview. For (a), fix by hand: double-quote the offending value with straight quotes. For (b), `fix_frontmatter.py` can auto-replace smart quotes with straight quotes. Quoted strings, flow collections, list items, and `sha256:abc` (colon with no space) are not flagged.
 - **Duplicate tags / status inconsistency**: minimal corrections are fine, e.g. `status: inbox` left behind in an organized directory. `status` should express lifecycle only (`active` / `done` / `archived`); legacy `status: resource/area/project` is only reported, not auto-changed; do not reorder frontmatter at scale.
@@ -218,7 +246,7 @@ Allowed auto-modifications are limited to (anything not in this list is report-o
 - Running `.claude/skills/meditate/scripts/fix_frontmatter.py` to repair frontmatter structure for non-protected notes (first line not `---` or no frontmatter)
 - Running `.claude/skills/meditate/scripts/generate_resource_index.py --dir "Resources/<topic>"` to update the resource-index marker block for a non-protected topic README (only when the README already has the marker block)
 - The model, on top of the script report, adding a few high-confidence semantic `[[wikilinks]]`, ownership resource indexes, or small topic indexes to non-protected Markdown
-- In weekly deep runs, refreshing at most 2 synthesis blocks and appending at most 3 `### 再巩固 <YYYY-MM-DD>` sections, always inside marker-block or append-only boundaries
+- In weekly deep runs, processing all report-authorized synthesis, restatement, and knowledge-restructuring candidates only within their respective marker-block or append-only boundaries; knowledge-restructuring may modify only the candidate anchor's complete marker block
 
 Forbidden:
 
@@ -260,7 +288,7 @@ When unsatisfied, do not commit; undo safely with a reverse `git mv` or Edit if 
 ### 11. Automation cadence
 
 - `.claude/meditate.sh nightly` is the light sleep cycle: run scan first, skip Claude entirely when there are no actionable deterministic items, otherwise let headless Claude execute `apply-safe` with wrappers and finalize the local log.
-- `.claude/meditate.sh weekly` is the deep cycle: do the same deterministic pass, then allow at most 2 synthesis candidates and 3 restatement candidates from `/tmp/meditate.json`. The runtime wrapper must pass the explicit allowed target paths into the headless prompt, block staged semantic writes to non-candidate files before commit, and fail the post-run audit if a weekly commit still drifts outside the report candidates.
+- `.claude/meditate.sh weekly` is the deep cycle: first commit the deterministic low-risk pass, refresh the JSON report (`<tempfile.gettempdir()>/meditate.json`), then process all high-confidence, write-eligible `restructuring_candidates` (and any compatible report-authorized deep candidates) with no numerical cap. The runtime wrapper passes explicit cluster / anchor / digest targets into the headless prompt, blocks staged marker drift before commit, and fails the post-run audit if any eligible cluster is absent, malformed, outside its anchor, has a wrong digest, or links to a non-existent filename stem. When no candidate passes the safety gate it records `无可安全重构项` rather than making a partial commit.
 - If protected paths exceed the script threshold, headless automation must degrade to scan-only and append a no-commit log entry instead of forcing edits through.
 - `.claude/meditate.log` stays local and ignored; only the actual vault changes produced and committed by the run enter git.
 
@@ -278,6 +306,7 @@ Log format:
 - 概念画像：<count>
 - 语义综合：<count>
 - 再巩固：<count>
+- 知识重构：<count>
 - 噪音清理：<count>
 - 编码损坏报告：<count>
 - 结构建议：<count>

@@ -211,6 +211,28 @@ class RuntimeEntryLayoutTest(unittest.TestCase):
         self.assertIn("weekly-prompt", text)
         self.assertIn("audit-weekly-commit", text)
 
+    def test_weekly_runtime_requires_every_restructuring_candidate(self) -> None:
+        text = (VAULT_ROOT / ".claude" / "meditate.sh").read_text(encoding="utf-8")
+        commit_wrapper = (VAULT_ROOT / ".claude" / "bin" / "safe-git-commit").read_text(encoding="utf-8")
+
+        self.assertIn("全部高置信、可写 restructuring_candidates", text)
+        self.assertIn("无可安全重构项", text)
+        self.assertIn("run_deterministic_apply_commit", text)
+        self.assertIn(".claude/bin/meditate-scan", text)
+        self.assertNotIn("最多 2 个 synthesis_candidates", text)
+        self.assertNotIn("最多 3 个 restatement_candidates", text)
+        self.assertIn("weekly_guard_has_violations", commit_wrapper)
+
+    def test_canonical_skill_documents_weekly_restructuring_contract(self) -> None:
+        text = (VAULT_ROOT / ".claude" / "skills" / "meditate" / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("知识重构与压缩", text)
+        self.assertIn("knowledge-restructuring", text)
+        self.assertIn("全部高置信、可写候选", text)
+        self.assertIn("无可安全重构项", text)
+        self.assertIn("只由 `meditate weekly`", text)
+        self.assertNotIn("at most 2 synthesis candidates", text)
+
     def test_headless_cadence_prompt_prevents_recursive_entrypoint_calls(self) -> None:
         text = (VAULT_ROOT / ".claude" / "meditate.sh").read_text(encoding="utf-8")
 

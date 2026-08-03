@@ -215,6 +215,223 @@ type: index
         restatement_paths = {item["path"] for item in report["restatement_candidates"]}
         self.assertIn("Resources/Agent Memory/Memory Routing Foundations.md", restatement_paths)
 
+    def test_build_report_emits_project_restructuring_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            git_init(vault)
+            write_note(vault / "Projects" / "Example.md", "Example", "project", "# Example")
+            write_note(
+                vault / "Projects" / "Example" / "Design Baseline.md",
+                "Design Baseline",
+                "reference",
+                "[[Example]]\n\nEvidence policy validation keeps decision records traceable.",
+            )
+            write_note(
+                vault / "Projects" / "Example" / "Design Revision.md",
+                "Design Revision",
+                "reference",
+                "[[Example]]\n[[Design Baseline]]\n\nThis revision refines evidence policy validation for decision records.",
+            )
+            write_note(
+                vault / "Projects" / "Example" / "Validation Evidence.md",
+                "Validation Evidence",
+                "reference",
+                "[[Example]]\n[[Design Revision]]\n\nEvidence policy validation verifies decision records before release.",
+            )
+            git_commit(vault, "initial knowledge", "2026-07-06T10:00:00")
+
+            report = optimize_vault.build_report(vault, ["Projects"])
+
+        self.assertEqual(1, len(report["restructuring_candidates"]))
+        candidate = report["restructuring_candidates"][0]
+        self.assertEqual("Projects/Example", candidate["scope"])
+        self.assertEqual("Projects/Example.md", candidate["anchor_path"])
+        self.assertEqual("refresh_anchor", candidate["action"])
+        self.assertEqual("high", candidate["confidence"])
+        self.assertEqual(
+            [
+                "Projects/Example/Design Baseline.md",
+                "Projects/Example/Design Revision.md",
+                "Projects/Example/Validation Evidence.md",
+            ],
+            candidate["member_paths"],
+        )
+        self.assertTrue(candidate["cluster_id"].startswith("kr-"))
+        self.assertTrue(candidate["source_set_digest"].startswith("sha256:"))
+        self.assertIn("refines", {item["kind"] for item in candidate["relations"]})
+
+    def test_restructuring_reports_relation_ambiguity_without_semantic_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            git_init(vault)
+            write_note(vault / "Projects" / "Example.md", "Example", "project", "# Example")
+            write_note(
+                vault / "Projects" / "Example" / "Capacity Plan.md",
+                "Capacity Plan",
+                "reference",
+                "[[Example]]\n\nCapacity allocation depends on regional workloads.",
+            )
+            write_note(
+                vault / "Projects" / "Example" / "Incident Review.md",
+                "Incident Review",
+                "reference",
+                "[[Example]]\n\nIncident containment requires operator escalation.",
+            )
+            write_note(
+                vault / "Projects" / "Example" / "Vendor Contract.md",
+                "Vendor Contract",
+                "reference",
+                "[[Example]]\n\nVendor clauses govern renewal obligations.",
+            )
+            git_commit(vault, "unrelated project materials", "2026-07-06T10:00:00")
+
+            report = optimize_vault.build_report(vault, ["Projects"])
+
+        self.assertEqual(1, len(report["restructuring_candidates"]))
+        candidate = report["restructuring_candidates"][0]
+        self.assertEqual("report_only", candidate["action"])
+        self.assertEqual("medium", candidate["confidence"])
+        self.assertIn("relation_ambiguous", candidate["blockers"])
+
+    def test_restructuring_reports_missing_member_source_link(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            git_init(vault)
+            write_note(vault / "Projects" / "Example.md", "Example", "project", "# Example")
+            write_note(
+                vault / "Projects" / "Example" / "Design Baseline.md",
+                "Design Baseline",
+                "reference",
+                "[[Example]]\n\nEvidence policy validation keeps decision records traceable.",
+            )
+            write_note(
+                vault / "Projects" / "Example" / "Design Revision.md",
+                "Design Revision",
+                "reference",
+                "[[Example]]\n[[Design Baseline]]\n[[Missing Source]]\n\nThis revision refines evidence policy validation for decision records.",
+            )
+            write_note(
+                vault / "Projects" / "Example" / "Validation Evidence.md",
+                "Validation Evidence",
+                "reference",
+                "[[Example]]\n[[Design Revision]]\n\nEvidence policy validation verifies decision records before release.",
+            )
+            git_commit(vault, "missing source link", "2026-07-06T10:00:00")
+
+            report = optimize_vault.build_report(vault, ["Projects"])
+
+        self.assertEqual(1, len(report["restructuring_candidates"]))
+        candidate = report["restructuring_candidates"][0]
+        self.assertEqual("report_only", candidate["action"])
+        self.assertIn("source_link_missing", candidate["blockers"])
+
+    def test_restructuring_uses_area_anchor_and_reappears_after_source_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            git_init(vault)
+            anchor = vault / "Areas" / "Automation.md"
+            write_note(anchor, "Automation", "area", "# Automation")
+            note_paths = [
+                vault / "Resources" / "Operations" / "Evidence Policy.md",
+                vault / "Resources" / "Engineering" / "Validation Plan.md",
+                vault / "Resources" / "Delivery" / "Decision Record.md",
+            ]
+            for path, title, body in (
+                (note_paths[0], "Evidence Policy", "Evidence policy validation keeps decision records traceable."),
+                (note_paths[1], "Validation Plan", "Evidence policy validation checks decision records before release."),
+                (note_paths[2], "Decision Record", "Evidence policy validation governs decision records for automation."),
+            ):
+                write_note(path, title, "reference", f"[[Automation]]\n\n{body}")
+            git_commit(vault, "area knowledge", "2026-07-06T10:00:00")
+
+            initial_report = optimize_vault.build_report(vault, ["Areas", "Resources"])
+            initial = initial_report["restructuring_candidates"][0]
+            anchor.write_text(
+                anchor.read_text(encoding="utf-8")
+                + f"""
+
+## 知识核心
+
+<!-- BEGIN: knowledge-restructuring cluster={initial['cluster_id']} -->
+- 覆盖材料：3 篇；来源集：{initial['source_set_digest']}；重构日期：2026-07-06
+<!-- END: knowledge-restructuring -->
+""",
+                encoding="utf-8",
+            )
+            git_commit(vault, "restructure area knowledge", "2026-07-06T10:10:00")
+
+            unchanged_report = optimize_vault.build_report(vault, ["Areas", "Resources"])
+            changed_note = note_paths[2]
+            changed_note.write_text(
+                changed_note.read_text(encoding="utf-8") + "\nAdditional validation evidence changes the current understanding.\n",
+                encoding="utf-8",
+            )
+            git_commit(vault, "new area evidence", "2026-07-06T10:20:00")
+            changed_report = optimize_vault.build_report(vault, ["Areas", "Resources"])
+
+        self.assertEqual("Areas/Automation", initial["scope"])
+        self.assertEqual("Areas/Automation.md", initial["anchor_path"])
+        self.assertEqual([], unchanged_report["restructuring_candidates"])
+        self.assertEqual(1, len(changed_report["restructuring_candidates"]))
+        refreshed = changed_report["restructuring_candidates"][0]
+        self.assertEqual(initial["source_set_digest"], refreshed["last_restructured_digest"])
+        self.assertNotEqual(initial["source_set_digest"], refreshed["source_set_digest"])
+
+    def test_restructuring_reports_protected_anchor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            git_init(vault)
+            anchor = vault / "Projects" / "Example.md"
+            write_note(anchor, "Example", "project", "# Example")
+            for filename, title in (
+                ("Design Baseline.md", "Design Baseline"),
+                ("Design Revision.md", "Design Revision"),
+                ("Validation Evidence.md", "Validation Evidence"),
+            ):
+                write_note(
+                    vault / "Projects" / "Example" / filename,
+                    title,
+                    "reference",
+                    f"[[Example]]\n\nEvidence policy validation keeps decision records traceable for {title}.",
+                )
+            git_commit(vault, "initial project knowledge", "2026-07-06T10:00:00")
+            anchor.write_text(anchor.read_text(encoding="utf-8") + "\nManual work in progress.\n", encoding="utf-8")
+
+            report = optimize_vault.build_report(vault, ["Projects"])
+
+        self.assertEqual(1, len(report["restructuring_candidates"]))
+        candidate = report["restructuring_candidates"][0]
+        self.assertEqual("report_only", candidate["action"])
+        self.assertIn("anchor_protected", candidate["blockers"])
+
+    def test_restructuring_report_markdown_and_log_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            git_init(vault)
+            write_note(vault / "Projects" / "Example.md", "Example", "project", "# Example")
+            for filename, title in (
+                ("Design Baseline.md", "Design Baseline"),
+                ("Design Revision.md", "Design Revision"),
+                ("Validation Evidence.md", "Validation Evidence"),
+            ):
+                write_note(
+                    vault / "Projects" / "Example" / filename,
+                    title,
+                    "reference",
+                    f"[[Example]]\n\nEvidence policy validation keeps decision records traceable for {title}.",
+                )
+            git_commit(vault, "report contract", "2026-07-06T10:00:00")
+
+            report = optimize_vault.build_report(vault, ["Projects"])
+            markdown = optimize_vault.markdown_report(report)
+            optimize_vault.append_log(vault, report, "2026-07-06 11:09")
+            log = (vault / ".claude" / "meditate.log").read_text(encoding="utf-8")
+
+        self.assertEqual(report["restructuring_candidates"], report["report_only"]["restructuring_candidates"])
+        self.assertIn("知识重构候选", markdown)
+        self.assertIn(report["restructuring_candidates"][0]["cluster_id"], markdown)
+        self.assertIn("- 知识重构：0", log)
+
     def test_append_log_reserves_semantic_fields_for_weekly_patch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp).resolve()
