@@ -3433,6 +3433,51 @@ def note_last_modified(vault: Path, note: Note) -> tuple[datetime | None, str]:
         return None, "missing"
 
 
+def note_last_modified_batch(
+    vault: Path, notes: list[Note]
+) -> dict[str, tuple[datetime | None, str]]:
+    """Last-modified lookup for many notes in one git subprocess.
+
+    git log prints commits newest-first, so for each path the first timestamp
+    it appears under is its latest modification time; paths absent from the
+    output (untracked / never committed) fall back to filesystem mtime, matching
+    note_last_modified semantics.
+    """
+    paths = [note.path for note in notes]
+    completed = run_git(
+        vault,
+        [
+            "-c",
+            "core.quotePath=false",
+            "log",
+            "--format=%ct",
+            "--name-only",
+            "--",
+            *paths,
+        ],
+    )
+    result: dict[str, tuple[datetime | None, str]] = {}
+    current_ts: int | None = None
+    if completed.returncode == 0:
+        for line in completed.stdout.splitlines():
+            if not line:
+                continue
+            if line.isdigit():
+                current_ts = int(line)
+            elif current_ts is not None and line not in result:
+                result[line] = (datetime.fromtimestamp(current_ts), "git")
+    for note in notes:
+        if note.path not in result:
+            try:
+                result[note.path] = (
+                    datetime.fromtimestamp(note.abs_path.stat().st_mtime),
+                    "filesystem",
+                )
+            except OSError:
+                result[note.path] = (None, "missing")
+    return result
+
+
 def archive_suggestion(path: str) -> str:
     rel = Path(path)
     if len(rel.parts) >= 3 and rel.parts[0] == "Resources":
@@ -3474,12 +3519,16 @@ def staleness_report(vault: Path, notes: list[Note], retrieval_180: dict) -> dic
     by_path = {item["path"]: item for item in retrieval_180.get("notes") or []}
     today = today_local()
     candidates: list[dict] = []
-    for note in sorted(notes, key=lambda item: item.path):
-        if not is_material_note(note):
-            continue
-        if note.path.startswith(("Areas/", "Projects/")) or Path(note.path).name == "README.md":
-            continue
-        modified_at, modified_source = note_last_modified(vault, note)
+    material_notes = [
+        note
+        for note in sorted(notes, key=lambda item: item.path)
+        if is_material_note(note)
+        and not note.path.startswith(("Areas/", "Projects/"))
+        and Path(note.path).name != "README.md"
+    ]
+    last_modified = note_last_modified_batch(vault, material_notes)
+    for note in material_notes:
+        modified_at, modified_source = last_modified[note.path]
         if modified_at is None:
             continue
         retrieval_count = int((by_path.get(note.path) or {}).get("retrieval_count", 0))

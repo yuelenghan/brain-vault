@@ -12,6 +12,19 @@ from pathlib import Path
 MIN_OWNERSHIP_AREA_CONCEPTS = 3
 WIKILINK_RE = re.compile(r"!?(?<!\!)\[\[([^\]]+)\]\]")
 
+# Precompiled negative-context patterns for text_mentions_name; hot path, do not
+# recompile per call.
+NEGATIVE_MENTION_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"不直接关联",
+        r"不关联",
+        r"无关",
+        r"not\s+directly\s+related",
+        r"not\s+related",
+    )
+)
+
 CONCEPT_STOPWORDS = {
     "about",
     "across",
@@ -204,14 +217,7 @@ def text_mentions_name(text: str, name: str) -> bool:
 
     def accepted(start: int, end: int) -> bool:
         window = text[max(0, start - 96) : min(len(text), end + 96)]
-        negative_patterns = (
-            r"不直接关联",
-            r"不关联",
-            r"无关",
-            r"not\s+directly\s+related",
-            r"not\s+related",
-        )
-        return not any(re.search(pattern, window, flags=re.IGNORECASE) for pattern in negative_patterns)
+        return not any(pattern.search(window) for pattern in NEGATIVE_MENTION_PATTERNS)
 
     if re.fullmatch(r"[A-Za-z0-9 _.-]+", name):
         pattern = r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])"
