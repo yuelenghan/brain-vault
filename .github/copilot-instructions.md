@@ -2,7 +2,7 @@
 
 This repository is a personal production knowledge vault, not an application codebase.
 
-When Copilot needs the user's long-term identity, goals, current projects, or collaboration preferences, treat `CLAUDE.md` as the shared identity layer and read `## 我是谁`, `## 今年的目标`, `## 协作偏好`, and `## 当前项目` there instead of maintaining a duplicate copy here.
+When Copilot needs the user's long-term identity, goals, current projects, or collaboration preferences, treat `CLAUDE.md` as the shared identity layer and read `## Who I am`, `## This year's goals`, `## Collaboration preferences`, and `## Current projects` there instead of maintaining a duplicate copy here.
 
 ## Repository purpose
 

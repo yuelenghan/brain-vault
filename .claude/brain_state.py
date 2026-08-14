@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-IDENTITY_SECTIONS = ("我是谁", "今年的目标", "当前项目")
-TEMPLATE_PLACEHOLDER = "待补充。"
+IDENTITY_SECTIONS = ("Who I am", "This year's goals", "Current projects")
+TEMPLATE_PLACEHOLDER = "To be filled in."
 SECTION_NOISE_LINES = {"---"}
 
 
@@ -63,13 +63,14 @@ def setup_block_message(vault: Path, next_command: str) -> str | None:
     if not status.needs_setup:
         return None
     if status.reason == "missing_claude_md":
-        detail = "当前 vault 缺少 `CLAUDE.md`，还没完成最小初始化。"
+        detail = "This vault is missing `CLAUDE.md`; minimal initialization is not complete."
     else:
         detail = (
-            "当前 vault 还没完成最小初始化：`CLAUDE.md` 中 `我是谁`、`今年的目标`、`当前项目` "
-            "仍是模板占位。"
+            "This vault has not completed minimal initialization: the `Who I am`, "
+            "`This year's goals`, and `Current projects` sections in `CLAUDE.md` still "
+            "contain the template placeholder."
         )
-    return f"{detail}\n请先运行 `/setup-brain`，再执行 `{next_command}`。"
+    return f"{detail}\nPlease run `/setup-brain` first, then run `{next_command}`."
 
 
 def main(argv: list[str]) -> int:

@@ -1,0 +1,27 @@
+#!/bin/sh
+# Ensure AGENTS.md (the Codex / DeepSeek Harness session entry point) is a symlink to
+# CLAUDE.md (the single maintenance source).
+# Usage: ./.claude/bin/sync-agents-md
+set -e
+VAULT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+cd "$VAULT"
+
+if [ ! -f CLAUDE.md ]; then
+    echo "Missing single maintenance source $VAULT/CLAUDE.md; aborting." >&2
+    exit 1
+fi
+
+if [ -L AGENTS.md ] && [ "$(readlink AGENTS.md)" = "CLAUDE.md" ]; then
+    echo "OK: AGENTS.md -> CLAUDE.md (no change needed)"
+    exit 0
+fi
+
+if [ -e AGENTS.md ] || [ -L AGENTS.md ]; then
+    rm -f AGENTS.md
+fi
+if ln -s CLAUDE.md AGENTS.md 2>/dev/null; then
+    echo "Restored symlink: AGENTS.md -> CLAUDE.md"
+else
+    cp CLAUDE.md AGENTS.md
+    echo "Symlinks unavailable (e.g. Windows); copied CLAUDE.md to AGENTS.md (the next commit will retry the symlink)"
+fi

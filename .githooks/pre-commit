@@ -1,0 +1,29 @@
+#!/bin/sh
+# Brain-vault single-source guard: CLAUDE.md is the single maintenance source;
+# AGENTS.md (the Codex / DeepSeek Harness session entry point) must be a symlink to it.
+# If the symlink is replaced (plain file / wrong target), this hook restores it before each commit.
+# Manual restore: .claude/bin/sync-agents-md.
+
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+cd "$root" || exit 0
+
+CLAUDE=CLAUDE.md
+AGENTS=AGENTS.md
+
+[ -f "$CLAUDE" ] || exit 0
+
+if [ -L "$AGENTS" ] && [ "$(readlink "$AGENTS")" = "$CLAUDE" ]; then
+    exit 0
+fi
+
+# AGENTS.md is not a correct symlink to CLAUDE.md: restore it (fall back to a content copy when symlinks are unavailable)
+rm -f "$AGENTS"
+if ln -s "$CLAUDE" "$AGENTS" 2>/dev/null; then
+    echo "[pre-commit] Restored symlink AGENTS.md -> CLAUDE.md (single maintenance source: CLAUDE.md)"
+else
+    cp "$CLAUDE" "$AGENTS"
+    echo "[pre-commit] Cannot create symlink (e.g. Windows); copied CLAUDE.md content to AGENTS.md"
+fi
+git add -- "$AGENTS"
+
+exit 0

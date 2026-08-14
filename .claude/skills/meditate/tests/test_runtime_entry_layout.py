@@ -110,8 +110,8 @@ class RuntimeEntryLayoutTest(unittest.TestCase):
 
         self.assertIn("run `/setup-brain` first", ingest_text)
         self.assertIn("run `/setup-brain` first", meditate_text)
-        self.assertIn("待补充。", ingest_text)
-        self.assertIn("待补充。", meditate_text)
+        self.assertIn("To be filled in.", ingest_text)
+        self.assertIn("To be filled in.", meditate_text)
 
     def test_canonical_recall_skill_uses_claude_script_paths(self) -> None:
         text = (VAULT_ROOT / ".claude" / "skills" / "recall" / "SKILL.md").read_text(encoding="utf-8")

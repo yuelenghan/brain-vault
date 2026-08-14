@@ -17,43 +17,43 @@ sys.modules[SPEC.name] = brain_state
 SPEC.loader.exec_module(brain_state)
 
 
-TEMPLATE_CLAUDE_MD = """# Brain Vault — 身份层
+TEMPLATE_CLAUDE_MD = """# Brain Vault — Identity layer
 
-## 我是谁
+## Who I am
 
-待补充。
+To be filled in.
 
-## 今年的目标
+## This year's goals
 
-待补充。
+To be filled in.
 
-## 协作偏好
+## Collaboration preferences
 
-- 有根据、不瞎编。
+- Evidence over invention.
 
-## 当前项目
+## Current projects
 
-待补充。
+To be filled in.
 """
 
 
-READY_CLAUDE_MD = """# Brain Vault — 身份层
+READY_CLAUDE_MD = """# Brain Vault — Identity layer
 
-## 我是谁
+## Who I am
 
-我是一名工程师，当前重点是维护 brain-vault。
+I am an engineer focused on maintaining brain-vault.
 
-## 今年的目标
+## This year's goals
 
-- 建好自己的知识库。
+- Build my knowledge base.
 
-## 协作偏好
+## Collaboration preferences
 
-- 有根据、不瞎编。
+- Evidence over invention.
 
-## 当前项目
+## Current projects
 
-- brain-vault：完善整理与回忆流程。
+- brain-vault: improve the organize and recall flows.
 """
 
 
@@ -108,31 +108,31 @@ class BrainStateTest(unittest.TestCase):
             )
 
         self.assertEqual(2, completed.returncode)
-        self.assertIn("请先运行 `/setup-brain`，再执行 `/ingest`。", completed.stderr)
+        self.assertIn("Please run `/setup-brain` first, then run `/ingest`.", completed.stderr)
 
     def test_template_sections_ignore_frontmatter_fences(self) -> None:
         text = """---
 title: test
 ---
 
-## 我是谁
+## Who I am
 
-待补充。
+To be filled in.
 
-## 今年的目标
+## This year's goals
 
-待补充。
+To be filled in.
 
-## 当前项目
+## Current projects
 
-待补充。
+To be filled in.
 """
 
         sections = brain_state.section_bodies(text)
 
-        self.assertEqual("待补充。", sections["我是谁"])
-        self.assertEqual("待补充。", sections["今年的目标"])
-        self.assertEqual("待补充。", sections["当前项目"])
+        self.assertEqual("To be filled in.", sections["Who I am"])
+        self.assertEqual("To be filled in.", sections["This year's goals"])
+        self.assertEqual("To be filled in.", sections["Current projects"])
 
 
 if __name__ == "__main__":

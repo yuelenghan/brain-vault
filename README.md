@@ -93,7 +93,7 @@ gh copilot -- --help
 codex
 ```
 
-本仓库提供 `AGENTS.md` 作为通用 agent 指令文件，供 Codex CLI 和其他支持仓库指令的工具参考；同时提供项目内 Codex skills：
+本仓库提供 `AGENTS.md`（指向 `CLAUDE.md` 的符号链接）作为通用 agent 指令文件，供 Codex CLI 和其他支持仓库指令的工具参考；同时提供项目内 Codex skills：
 
 ```text
 .codex/skills/setup-brain/SKILL.md
@@ -117,7 +117,7 @@ Archive/    # 已完成、过期或归档内容
 .codex/     # 项目内 Codex CLI skills
 .copilot/   # 项目内 Copilot CLI plugin 和 skills
 .github/    # GitHub Copilot 仓库指令
-AGENTS.md   # 通用 agent 指令
+AGENTS.md   # 通用 agent 指令（指向 CLAUDE.md 的符号链接）
 ```
 
 ## 日常使用
@@ -128,7 +128,7 @@ AGENTS.md   # 通用 agent 指令
 /ingest
 ```
 
-如果 vault 还没完成最小 `/setup-brain` 初始化（`CLAUDE.md` 中 `我是谁`、`今年的目标`、`当前项目` 仍是 `待补充。` 占位），`/ingest` 会先停下来提示你运行 `/setup-brain`；离线整理入口 `ingest.sh` / `ingest.ps1` / `meditate.sh` 同样会拒绝继续。
+如果 vault 还没完成最小 `/setup-brain` 初始化（`CLAUDE.md` 中 `Who I am`、`This year's goals`、`Current projects` 仍是 `To be filled in.` 占位），`/ingest` 会先停下来提示你运行 `/setup-brain`；离线整理入口 `ingest.sh` / `ingest.ps1` / `meditate.sh` 同样会拒绝继续。
 
 整理时会先运行确定性预处理脚本，枚举 Inbox 文件、转换可支持格式、生成来源指纹并识别完全重复；随后会：
 
@@ -314,7 +314,7 @@ Claude Code 会话内任务更适合短期或随会话运行的提醒；Codex �
 - `/ingest` 整理技能；
 - `/recall` 检索技能；
 - `.github/copilot-instructions.md`；
-- `AGENTS.md`；
+- `AGENTS.md`（指向 `CLAUDE.md` 的符号链接）；
 - `safe-markitdown`、`safe-whisper` 和受限 `safe-mkdir` / `safe-git-*` / `ingest-*` 安全 wrapper；
 - `/meditate` 已整理笔记优化技能；
 - `ingest`、`recall` 和 `meditate` 的确定性辅助脚本与本地日志约定；
@@ -423,7 +423,7 @@ If you use Codex CLI, run it from the repository root:
 codex
 ```
 
-This repository provides `AGENTS.md` as a general agent instruction file for Codex CLI and other tools that support repository instructions; it also provides project-internal Codex skills:
+This repository provides `AGENTS.md` (a symlink to `CLAUDE.md`) as a general agent instruction file for Codex CLI and other tools that support repository instructions; it also provides project-internal Codex skills:
 
 ```text
 .codex/skills/setup-brain/SKILL.md
@@ -447,7 +447,7 @@ Archive/    # Completed, expired, or archived content
 .codex/     # Project-internal Codex CLI skills
 .copilot/   # Project-internal Copilot CLI plugin and skills
 .github/    # GitHub Copilot repository instructions
-AGENTS.md   # General agent instructions
+AGENTS.md   # General agent instructions (symlink to CLAUDE.md)
 ```
 
 ## Daily Usage
@@ -458,7 +458,7 @@ Put material into `Inbox/`, then run in Claude Code:
 /ingest
 ```
 
-If the vault has not finished the minimal `/setup-brain` initialization (the `## 我是谁`, `## 今年的目标`, and `## 当前项目` sections in `CLAUDE.md` still contain the `待补充。` placeholder), `/ingest` stops first and asks you to run `/setup-brain`; the offline entry points `ingest.sh` / `ingest.ps1` / `meditate.sh` refuse to continue for the same reason.
+If the vault has not finished the minimal `/setup-brain` initialization (the `## Who I am`, `## This year's goals`, and `## Current projects` sections in `CLAUDE.md` still contain the `To be filled in.` placeholder), `/ingest` stops first and asks you to run `/setup-brain`; the offline entry points `ingest.sh` / `ingest.ps1` / `meditate.sh` refuse to continue for the same reason.
 
 Organizing first runs a deterministic preprocessing script that enumerates Inbox files, converts supported formats, generates source fingerprints, and detects exact duplicates; then it will:
 
@@ -650,7 +650,7 @@ This repository includes:
 - The `/ingest` organizing skill;
 - The `/recall` retrieval skill;
 - `.github/copilot-instructions.md`;
-- `AGENTS.md`;
+- `AGENTS.md` (a symlink to `CLAUDE.md`);
 - `safe-markitdown`, `safe-whisper`, and restricted `safe-mkdir` / `safe-git-*` / `ingest-*` safe wrappers;
 - The `/meditate` skill for optimizing organized notes;
 - Deterministic helper scripts and local-log conventions for `ingest`, `recall`, and `meditate`;

@@ -83,18 +83,18 @@ For the exact default Stage A payload and copy-ready option wording, read `refer
 
 If the user is not working in Chinese, localize the wording but keep the same structure, recommendation order, and preview intent.
 
-After the interactive answers return, ask only for the missing concrete text needed to fill `## 我是谁`, `## 今年的目标`, and `## 当前项目`. Keep this follow-up short and structured, and match the template to the formats the user selected. For example:
+After the interactive answers return, ask only for the missing concrete text needed to fill `## Who I am`, `## This year's goals`, and `## Current projects`. Keep this follow-up short and structured, and match the template to the formats the user selected. For example:
 
 ```markdown
-请按下面模板补充即可：
-- 我是谁：我是一名……，主要负责……，当前重点是……
-- 今年的目标：
-  - ……
-  - ……
-  - ……
-- 当前项目：
-  1. 项目 A：……
-  2. 项目 B：……
+Please fill in the template below:
+- Who I am: I am a …, mainly responsible for …, current focus is …
+- This year's goals:
+  - …
+  - …
+  - …
+- Current projects:
+  1. Project A: …
+  2. Project B: …
 ```
 
 If the user chose `轻微调整` or `完全替换`, add `- 协作偏好：……` to the same follow-up instead of opening a fresh broad interview.
@@ -129,18 +129,18 @@ When the user narrows Stage B to a single slot, keep the answer equally narrow:
 - `格式` only → ask only the `格式` question and stop there.
 - `转录` only + `现在指定` → first acknowledge that `格式` / `自动化` stay skipped or deferred, then ask only for `Whisper model` and `language`.
 - In that transcription-only branch, do **not** re-ask whether the user accepts first-download behavior if they already said they want to specify the values now; save the reminder for the final output or the moment before a real transcription.
-- In that transcription-only branch, do **not** pull `我是谁` / `目标` / `项目` back into the turn unless the user explicitly switched back to identity initialization.
+- In that transcription-only branch, do **not** pull `Who I am` / `goals` / `projects` back into the turn unless the user explicitly switched back to identity initialization.
 
 ### 3. Generate or update the shared identity layer
 
 Update these sections in `CLAUDE.md` from the user's answers:
 
-- `## 我是谁`
-- `## 今年的目标`
-- `## 协作偏好`
-- `## 当前项目`
+- `## Who I am`
+- `## This year's goals`
+- `## Collaboration preferences`
+- `## Current projects`
 
-Treat `CLAUDE.md` as the canonical shared identity layer for this vault. Claude Code reads it directly; Codex and Copilot should be guided to the same sections through `AGENTS.md` and `.github/copilot-instructions.md` rather than maintaining duplicated identity text in multiple files.
+Treat `CLAUDE.md` as the canonical shared identity layer for this vault — the single maintenance source. Claude Code reads it directly; Codex and DeepSeek Harness read `AGENTS.md`, which is a symlink to `CLAUDE.md` (`AGENTS.md -> CLAUDE.md`) so content stays identical by construction. If the symlink is ever replaced by a plain file (e.g. Windows checkout or accidental edit), `.githooks/pre-commit` restores it on the next commit, or run `.claude/bin/sync-agents-md` manually. Never edit `AGENTS.md` directly. `.github/copilot-instructions.md` should point Copilot at the same sections rather than duplicating identity text.
 
 Keep the Vault conventions, common commands, tool tiers, and project-level pitfalls below those sections. Do not write temporary task state, one-off information, or credentials.
 

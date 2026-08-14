@@ -14,7 +14,7 @@ The working directory is the brain-vault root; all paths are relative to the vau
 Before any scan / prepare / apply step, read `CLAUDE.md` first.
 
 - If `CLAUDE.md` is missing, stop and tell the user to run `/setup-brain` first.
-- If the `## 我是谁`, `## 今年的目标`, and `## 当前项目` sections still all contain the template placeholder `待补充。`, stop and tell the user to run `/setup-brain` first.
+- If the `## Who I am`, `## This year's goals`, and `## Current projects` sections still all contain the template placeholder `To be filled in.`, stop and tell the user to run `/setup-brain` first.
 - Do not continue to `scan`, `prepare`, `apply-ready`, or `apply-duplicates` until that minimal initialization is complete.
 
 ### 1. Run the deterministic preprocessor first

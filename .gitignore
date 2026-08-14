@@ -20,6 +20,7 @@
 !.claude/ingest.ps1
 !.claude/bin/
 .claude/bin/*
+!.claude/bin/sync-agents-md
 !.claude/bin/ingest-apply-ready
 !.claude/bin/ingest-apply-ready.cmd
 !.claude/bin/ingest-apply-duplicates
