@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -37,6 +38,21 @@ CONVERSION_ERROR_RE = re.compile(
 RESOURCE_INDEX_BEGIN = "<!-- BEGIN: resource-index -->"
 RESOURCE_INDEX_END = "<!-- END: resource-index -->"
 TEST_REPORT_DIR_ENV = "INGEST_TEST_REPORT_DIR"
+
+
+def load_meditate_knowledge_model():
+    """Load the canonical shared semantic rules without copying them here."""
+    module_path = Path(__file__).resolve().parents[2] / "meditate" / "scripts" / "knowledge_model.py"
+    spec = importlib.util.spec_from_file_location("ingest_meditate_knowledge_model", module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load shared knowledge model: {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+knowledge_model = load_meditate_knowledge_model()
 
 
 def fixed_report_dir() -> Path:
@@ -1026,14 +1042,25 @@ def score_topic_candidate(
     return score, evidence
 
 
-def score_owner_candidate(text: str, concepts: Counter[str], owner: dict, owner_term_frequency: Counter[str]) -> tuple[int, list[str]]:
+def score_owner_candidate(
+    title: str,
+    source_text: str,
+    concepts: Counter[str],
+    owner: dict,
+    owner_term_frequency: Counter[str],
+) -> tuple[int, list[str]]:
     score = 0
     evidence: list[str] = []
+    seen_names: set[str] = set()
     for name in [owner["stem"], owner["title"], *owner["aliases"]]:
-        if text_mentions_name(text, name):
-            score += 8
-            evidence.append(f"matched ownership name: {name}")
-            break
+        key = normalize_name(name)
+        if not name or key in seen_names:
+            continue
+        seen_names.add(key)
+        name_score, name_evidence = knowledge_model.project_ownership_evidence(title, source_text, name)
+        if name_score > score:
+            score = name_score
+            evidence = name_evidence
     candidate_terms = set(top_concepts(concepts, limit=24))
     owner_terms = {
         term
@@ -1515,6 +1542,8 @@ def understanding_hints(vault: Path, candidates: list[Candidate], index: dict, i
         if candidate.status != "ready" or not candidate.markdown_path:
             continue
         text, concepts = candidate_text(vault, candidate)
+        source_text = candidate_source_text(vault, candidate)
+        candidate_title = candidate.title or Path(candidate.markdown_path).stem
         target_candidates: list[dict] = []
         notes: list[str] = ["report-only; model must verify before moving or editing"]
         scored_topics: list[tuple[int, str, list[str], dict]] = []
@@ -1546,7 +1575,7 @@ def understanding_hints(vault: Path, candidates: list[Candidate], index: dict, i
         for owner in index["owners"]:
             if Path(owner["path"]).parts[0] != "Projects":
                 continue
-            score, evidence = score_owner_candidate(text, concepts, owner, owner_frequency)
+            score, evidence = score_owner_candidate(candidate_title, source_text, concepts, owner, owner_frequency)
             if score <= 0:
                 continue
             target_candidates.append({
@@ -1558,6 +1587,17 @@ def understanding_hints(vault: Path, candidates: list[Candidate], index: dict, i
                 "evidence": [*evidence, "matched existing Project owner"],
             })
         target_candidates.sort(key=lambda item: (-item["score"], item["target"]))
+        ambiguous_project_note: str | None = None
+        if target_candidates and target_candidates[0].get("scope") == "Projects":
+            best_score = target_candidates[0]["score"]
+            tied_projects = [
+                item["project"]
+                for item in target_candidates
+                if item.get("scope") == "Projects" and item.get("score") == best_score
+            ]
+            if len(tied_projects) > 1:
+                ambiguous_project_note = "ambiguous project owner candidates: " + ", ".join(tied_projects)
+                notes.append(ambiguous_project_note)
         if ambiguous_topic_note:
             primary_target = target_candidates[0] if target_candidates else None
             project_owner_name_matched = bool(primary_target) and any(
@@ -1580,7 +1620,7 @@ def understanding_hints(vault: Path, candidates: list[Candidate], index: dict, i
 
         owner_candidates: list[dict] = []
         for owner in index["owners"]:
-            score, evidence = score_owner_candidate(text, concepts, owner, owner_frequency)
+            score, evidence = score_owner_candidate(candidate_title, source_text, concepts, owner, owner_frequency)
             if score > 0:
                 owner_candidates.append({
                     "path": owner["path"],
@@ -1935,7 +1975,11 @@ def placement_readiness(report: dict, vault: Path | None = None) -> dict:
         if not targets:
             reasons.append("no target candidate")
         notes = hint.get("notes") or []
-        if any("ambiguous target topic candidates" in note for note in notes):
+        if any(
+            marker in note
+            for note in notes
+            for marker in ("ambiguous target topic candidates", "ambiguous project owner candidates")
+        ):
             reasons.append("ambiguous target")
         action_owners = [
             action["path"]

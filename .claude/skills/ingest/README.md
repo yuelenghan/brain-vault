@@ -31,4 +31,4 @@ Inbox PDF 的自动整理边界是 `safe-markitdown` 生成的 Markdown。即使
 
 ingest 写入 frontmatter 的 `tags` 来自源材料或模型推荐，可能含 Obsidian 禁用字符。Obsidian tag 合法字符集见 `app.js` 的 `jx` 正则：禁止 ASCII 标点（除 `-` `_` `/`）、Unicode 标点区间 `U+2000–U+206F` / `U+2E00–U+2E7F`、空白；含禁用字符的 tag 在 Properties 面板显示红色+删除线（CSS `.multi-select-pill.is-invalid` 用 `--text-error`），悬停提示 `Invalid tag`，且不进入 tag 检索/补全。
 
-`parse_tag_list`（`ingest.py`）在写入前对每个 tag 跑 `sanitize_tag`：去前导 `#`、禁用字符替换为 `-`、折叠连续 `-`、去首尾 `-`、去重、丢空。如 `spec-runner-2.0` → `spec-runner-2-0`。纯数字 tag（如 `2024`）仍被 Obsidian 判无效（`XA=/^#\d+$/`，另一规则），清洗不处理。改字符集时，先解包本机 `/Applications/Obsidian.app/Contents/Resources/obsidian.asar` 读 `app.js` 里的 `jx` 与 `XA` 确认现行规则。
+`parse_tag_list`（`ingest.py`）在写入前对每个 tag 跑 `sanitize_tag`：去前导 `#`、禁用字符替换为 `-`、折叠连续 `-`、去首尾 `-`、去重、丢空。如 `spec-2.0` → `spec-2-0`。纯数字 tag（如 `2024`）仍被 Obsidian 判无效（`XA=/^#\d+$/`，另一规则），清洗不处理。改字符集时，先解包本机 `/Applications/Obsidian.app/Contents/Resources/obsidian.asar` 读 `app.js` 里的 `jx` 与 `XA` 确认现行规则。

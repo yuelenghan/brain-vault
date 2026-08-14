@@ -260,6 +260,40 @@ type: index
         self.assertTrue(candidate["source_set_digest"].startswith("sha256:"))
         self.assertIn("refines", {item["kind"] for item in candidate["relations"]})
 
+    def test_apply_safe_rehomes_plan_to_title_subject_project_not_integration_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            git_init(vault)
+            write_note(vault / "Projects" / "integration-project.md", "integration-project", "project", "Shared tools.")
+            write_note(vault / "Projects" / "primary-project.md", "primary-project", "project", "Workflow runtime and state machine.")
+            write_note(vault / "Projects" / "primary-project" / "Existing Runtime.md", "Existing Runtime", "reference", "primary-project runtime evidence.")
+            misplaced = vault / "Projects" / "integration-project" / "Design - primary-project Native Adoption.md"
+            write_note(
+                misplaced,
+                "Design - primary-project Native Adoption",
+                "reference",
+                """Copy a capability into the primary-project module and state-machine contract; runtime does not call the external capability or integration-project checkout.
+
+Add review schemas, state transitions, a native controller, and a host adapter; this research also informs integration-project/primary-project integration choices.""",
+            )
+            git_commit(vault, "misplaced primary-project plan", "2026-07-06T10:00:00")
+
+            report = run_apply_safe(vault)
+
+            target = vault / "Projects" / "primary-project" / misplaced.name
+            self.assertTrue(target.is_file())
+            self.assertFalse(misplaced.exists())
+            self.assertIn(
+                {
+                    "source": "Projects/integration-project/Design - primary-project Native Adoption.md",
+                    "target": "Projects/primary-project/Design - primary-project Native Adoption.md",
+                    "kind": "project_note_rehome",
+                    "matched": ["primary-project"],
+                    "source_moves": [],
+                },
+                report["applied"]["projects_structure_moves"],
+            )
+
     def test_restructuring_reports_relation_ambiguity_without_semantic_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp).resolve()

@@ -128,6 +128,28 @@ class LinkIntegrityAndUnderstandingTest(unittest.TestCase):
 
         self.assertEqual([], report["broken_links"])
 
+    def test_path_wikilink_to_markdown_stem_ending_in_decimal_is_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            target = (
+                vault
+                / "Projects"
+                / "agent"
+                / "design"
+                / "Agent 2.0 Design - 2026-07-22.md"
+            )
+            write_note(target, "Agent 2.0 Design", "reference")
+            write_note(
+                vault / "Resources" / "AI Agents" / "Ref.md",
+                "Ref",
+                "reference",
+                "See [[Projects/agent/design/Agent 2.0 Design - 2026-07-22]].",
+            )
+
+            report = optimize_vault.build_report(vault, ["Resources"])
+
+        self.assertEqual([], report["broken_links"])
+
     def test_apply_empty_stubs_keeps_stub_when_causal_reference_is_protected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp).resolve()

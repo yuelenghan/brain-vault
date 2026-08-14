@@ -122,7 +122,8 @@ The script has generated a source URL and `source_fingerprint` for each `ready` 
 - Uncertain or insufficient information → leave in `Inbox/`
 
 - 归位目标由模型基于 PARA 语义、现有目录结构和材料类型自主判断；脚本的 `understanding_hints` / `organization_plan` / `frontmatter_patch_plan` 是建议而非指令，模型可偏离。
-- 归位到 `Projects/<dir>/` 时，project 由 ownership note 决定；若 Inbox 笔记 stem 不以 `<dir>` 或其 ownership project stem 开头（主题属于另一个 project），改归到正确 project 目录，避免制造目录内容错位（如 proj 评审报告误入 integration-project/）。
+- 归位到 `Projects/<dir>/` 时，project 由 ownership note 决定；若 Inbox 笔记 stem 不以 `<dir>` 或其 ownership project stem 开头（主题属于另一个 project），改归到正确 project 目录，避免制造目录内容错位（如 primary-project 评审报告误入 integration-project/）。
+- When multiple Projects are mentioned, an explicit plan/design/implementation subject in the title and non-negated runtime or delivery evidence outrank integration, research, comparison, and cross-project references. Negative relations such as `not called`, `not dependent on`, or `not related` are never ownership evidence. If the highest Project score is tied, leave the candidate in `Inbox/` and report the ambiguity; never choose by directory or alphabetical order.
 - 出现归位分歧（脚本建议与模型判断不一致）时，以模型判断为准，不询问用户；在日志备注和最终输出简要说明偏离理由。归位选择、提炼、补链、frontmatter 字段均由模型自主决定。
 - ingest 必须能在 headless / cron 下全程自动运行，不依赖人工介入；仅删除/覆盖既有内容、推送远端等不可逆操作才需用户确认。
 

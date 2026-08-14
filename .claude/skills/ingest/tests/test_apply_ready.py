@@ -1116,10 +1116,14 @@ exit 0
             wrapper_src = source_root / ".claude" / "bin" / "ingest-apply-ready"
             wrapper_dst = vault / ".claude" / "bin" / "ingest-apply-ready"
             script_dst = vault / ".claude" / "skills" / "ingest" / "scripts" / "ingest.py"
+            knowledge_model_src = source_root / ".claude" / "skills" / "meditate" / "scripts" / "knowledge_model.py"
+            knowledge_model_dst = vault / ".claude" / "skills" / "meditate" / "scripts" / "knowledge_model.py"
             wrapper_dst.parent.mkdir(parents=True, exist_ok=True)
             script_dst.parent.mkdir(parents=True, exist_ok=True)
+            knowledge_model_dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(wrapper_src, wrapper_dst)
             shutil.copy2(MODULE_PATH, script_dst)
+            shutil.copy2(knowledge_model_src, knowledge_model_dst)
             wrapper_dst.chmod(0o755)
             _json_report, markdown_report, env = isolated_report_env(vault)
 

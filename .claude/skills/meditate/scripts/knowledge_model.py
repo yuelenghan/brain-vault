@@ -25,6 +25,41 @@ NEGATIVE_MENTION_PATTERNS = tuple(
     )
 )
 
+# A project can appear in a note as an integration neighbour, a source to
+# avoid at runtime, or the project that owns the deliverable.  Treating those
+# mentions identically made project placement fall back to filename order when
+# two projects were mentioned together.  The helpers below deliberately use
+# only local text evidence: an explicit project subject in the title is
+# stronger than a body mention, while an excluded runtime dependency is never
+# ownership evidence.
+PROJECT_TITLE_SUBJECT_PREFIXES = {
+    "方案",
+    "方案变更",
+    "方案评审",
+    "设计",
+    "设计方案",
+    "架构",
+    "架构设计",
+    "决策",
+    "调研",
+    "计划",
+    "plan",
+    "proposal",
+    "design",
+    "architecture",
+    "decision",
+    "research",
+    "review",
+    "implementation",
+    "implementationplan",
+}
+PROJECT_NEGATED_OPERATION_RE = re.compile(
+    r"(?:不|未|无需|无须|不得|禁止|非|not|without|no)"
+    r"[^。；;\\n]{0,48}"
+    r"(?:调用|依赖|引用|使用|接入|集成|运行|关联|call|invoke|depend(?:\\s+on)?|use|integrat\\w*|related)",
+    re.IGNORECASE,
+)
+
 CONCEPT_STOPWORDS = {
     "about",
     "across",
@@ -232,6 +267,69 @@ def text_mentions_name(text: str, name: str) -> bool:
         if accepted(idx, idx + len(name)):
             return True
         start = idx + len(name)
+
+
+def _project_name_matches(text: str, name: str):
+    """Yield bounded project-name matches without accepting token substrings."""
+    if not name:
+        return []
+    if re.fullmatch(r"[A-Za-z0-9 _.-]+", name):
+        pattern = r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])"
+    else:
+        pattern = re.escape(name)
+    return list(re.finditer(pattern, text, flags=re.IGNORECASE))
+
+
+def _project_title_subject_match(title: str, name: str) -> bool:
+    for match in _project_name_matches(title, name):
+        prefix = title[:match.start()].strip(" \t-–—_:：|/\\")
+        normalized_prefix = re.sub(r"[\s\-–—_:：|/\\]+", "", prefix).casefold()
+        if not normalized_prefix or normalized_prefix in PROJECT_TITLE_SUBJECT_PREFIXES:
+            return True
+    return False
+
+
+def _project_name_is_negated(text: str, start: int, end: int) -> bool:
+    # A negated dependency must lead to this project name ("not calling X"),
+    # not merely occur later in the same sentence after another project was
+    # named. Looking across both sides would incorrectly downgrade the owner.
+    prefix_start = max(text.rfind(boundary, 0, start) for boundary in ("。", "；", ";", "\\n", ".", "!", "?")) + 1
+    prefix = text[max(prefix_start, start - 112) : start]
+    return bool(PROJECT_NEGATED_OPERATION_RE.search(prefix)) or any(
+        pattern.search(prefix) for pattern in NEGATIVE_MENTION_PATTERNS
+    )
+
+
+def project_ownership_evidence(title: str, body: str, project_name: str) -> tuple[int, list[str]]:
+    """Return deterministic project-ownership evidence for a material note.
+
+    A project named as the subject of a plan/design title receives a deliberate
+    lead over incidental integration references. Body mentions remain useful
+    for ordinary project records, except where the note explicitly says that
+    project is not called, depended on, or related at runtime.
+    """
+    score = 0
+    evidence: list[str] = []
+    if _project_title_subject_match(title, project_name):
+        score += 16
+        evidence.append(f"matched project as title subject: {project_name}")
+    elif _project_name_matches(title, project_name):
+        score += 4
+        evidence.append(f"matched project in title: {project_name}")
+
+    positive_body_mention = False
+    negated_body_mention = False
+    for match in _project_name_matches(body, project_name):
+        if _project_name_is_negated(body, match.start(), match.end()):
+            negated_body_mention = True
+            continue
+        positive_body_mention = True
+    if positive_body_mention:
+        score += 8
+        evidence.append(f"matched project in source body: {project_name}")
+    if negated_body_mention:
+        evidence.append(f"excluded negated runtime/reference mention: {project_name}")
+    return score, evidence
 
 
 def normalize_concept_token(token: str) -> str:

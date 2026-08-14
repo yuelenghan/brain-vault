@@ -516,6 +516,63 @@ class IntakeUnderstandingTest(unittest.TestCase):
         self.assertEqual(["Projects/spec-runner.md"], readiness["ownership"])
         self.assertNotIn("ambiguous target", readiness["reasons"])
 
+    def test_project_title_subject_beats_integration_reference_and_excluded_runtime_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            write_note(
+                vault / "Projects" / "integration-project.md",
+                "integration-project",
+                "project",
+                "Shared tooling, governance rules, and automation scenarios.",
+            )
+            write_note(
+                vault / "Projects" / "primary-project.md",
+                "primary-project",
+                "project",
+                "Workflow runtime, state machine, product contracts, and adapters.",
+            )
+            write_note(
+                vault / "Inbox" / "Design - primary-project Native Adoption.md",
+                "Design - primary-project Native Adoption",
+                "reference",
+                """Copy a capability into the primary-project module and state-machine contract; runtime does not call the external capability or integration-project checkout.
+
+Add review schemas, state transitions, a native controller, and a host adapter; this research also informs integration-project/primary-project integration choices.""",
+            )
+
+            report = ingest.make_report(vault, convert=False)
+
+        path = "Inbox/Design - primary-project Native Adoption.md"
+        hint = report["understanding_hints"][path]
+        self.assertEqual(
+            "Projects/primary-project/Design - primary-project Native Adoption.md",
+            hint["target_candidates"][0]["target"],
+        )
+        self.assertIn("matched project as title subject: primary-project", hint["target_candidates"][0]["evidence"])
+        self.assertNotIn("excluded negated runtime/reference mention: primary-project", hint["target_candidates"][0]["evidence"])
+        integration_target = next(item for item in hint["target_candidates"] if item.get("project") == "integration-project")
+        self.assertIn("excluded negated runtime/reference mention: integration-project", integration_target["evidence"])
+        self.assertEqual("ready", report["placement_readiness"][path]["status"])
+
+    def test_equally_supported_projects_block_first_pass_placement(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve()
+            write_note(vault / "Projects" / "integration-project.md", "integration-project", "project", "Shared tooling.")
+            write_note(vault / "Projects" / "primary-project.md", "primary-project", "project", "Workflow automation product.")
+            write_note(
+                vault / "Inbox" / "Integration Decision.md",
+                "Integration Decision",
+                "reference",
+                "This note compares integration-project and primary-project without selecting an implementation owner.",
+            )
+
+            report = ingest.make_report(vault, convert=False)
+
+        path = "Inbox/Integration Decision.md"
+        self.assertEqual("blocked", report["placement_readiness"][path]["status"])
+        self.assertIn("ambiguous target", report["placement_readiness"][path]["reasons"])
+        self.assertEqual("blocked", report["organization_plan"][path]["status"])
+
     def test_placement_readiness_blocks_when_ownership_action_is_required(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp).resolve()

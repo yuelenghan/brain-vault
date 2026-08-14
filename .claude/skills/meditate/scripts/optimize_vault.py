@@ -371,11 +371,10 @@ def markdown_link_path_candidates(target: str) -> list[str]:
     cleaned = target.replace("\\", "/").strip()
     if not cleaned:
         return []
-    suffix = Path(cleaned).suffix.lower()
-    if suffix and suffix != ".md":
-        return []
-    if suffix == ".md":
+    if cleaned.lower().endswith(".md"):
         return [normalize_relpath(cleaned)]
+    if Path(cleaned).suffix.lower() in SOURCE_EXTENSIONS:
+        return []
     return [normalize_relpath(f"{cleaned}.md")]
 
 
@@ -2350,6 +2349,16 @@ def projects_ownership_notes(notes: list[Note]) -> dict[str, str]:
     return owners
 
 
+def project_ownership_note_records(notes: list[Note]) -> dict[str, Note]:
+    """Return the top-level Project ownership notes keyed by raw stem."""
+    records: dict[str, Note] = {}
+    for note in notes:
+        parts = Path(note.path).parts
+        if len(parts) == 2 and parts[0] == "Projects" and note_kind(note) == "project":
+            records[Path(note.path).stem] = note
+    return records
+
+
 def _project_stem_prefix_matches(haystack_norm: str, owners: dict[str, str]) -> list[str]:
     """Raw ownership stems whose normalized stem is a prefix token of
     haystack_norm (equal, or haystack starts with stem + space). Longest-first."""
@@ -2418,10 +2427,11 @@ def projects_structure_candidates(
     - project_note_rehome: a content note under Projects/<dir>/ whose stem
       begins with a different ownership project stem rehomes to
       Projects/<project>/ (or Projects/<project>/<sub>/ when a matching
-      subdirectory exists), e.g. spec-runner review reports under primary-project/.
+      subdirectory exists), e.g. primary-project review reports under integration-project/.
     """
     safety_notes = all_notes if all_notes is not None else notes
     owners = projects_ownership_notes(notes)
+    owner_records = project_ownership_note_records(notes)
     if not owners:
         return []
 
@@ -2503,21 +2513,35 @@ def projects_structure_candidates(
             continue  # moves with the directory
         note_stem = Path(note.path).stem
         note_norm = normalize_name(note_stem)
-        matched = _project_stem_prefix_matches(note_norm, owners)
-        if not matched:
+        prefix_matches = _project_stem_prefix_matches(note_norm, owners)
+        semantic_scores: dict[str, tuple[int, list[str]]] = {}
+        source_text = source_text_without_wikilinks(note)
+        for project, owner_note in owner_records.items():
+            score, evidence = knowledge_model.project_ownership_evidence(note.title, source_text, project)
+            if score:
+                semantic_scores[project] = (score, evidence)
+        for project in prefix_matches:
+            score, evidence = semantic_scores.get(project, (0, []))
+            semantic_scores[project] = (score + 100, [*evidence, f"matched project filename prefix: {project}"])
+        if not semantic_scores:
             continue
-        if len(matched) > 1 and len(matched[0]) == len(matched[1]):
+        highest_score = max(score for score, _evidence in semantic_scores.values())
+        matched = sorted(
+            [project for project, (score, _evidence) in semantic_scores.items() if score == highest_score],
+            key=lambda item: (-len(item), item),
+        )
+        if len(matched) > 1:
             candidates.append({
                 "source": note.path,
                 "target": "",
                 "kind": "project_note_rehome",
-                "matched": matched[:2],
+                "matched": matched,
                 "from_dir": dir_name,
                 "to_project": "",
                 "to_subdir": "",
                 "status": "ambiguous",
                 "fixable": False,
-                "reason": "note stem matches multiple project stems",
+                "reason": "note has equally strong project ownership evidence",
                 "source_moves": [],
             })
             continue
@@ -2542,6 +2566,7 @@ def projects_structure_candidates(
             "target": target_note,
             "kind": "project_note_rehome",
             "matched": [project] + ([best_sub] if best_sub else []),
+            "ownership_evidence": semantic_scores.get(project, (0, []))[1],
             "from_dir": dir_name,
             "to_project": project,
             "to_subdir": best_sub,
